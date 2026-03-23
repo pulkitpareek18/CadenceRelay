@@ -6,7 +6,7 @@ import { detectVariables, renderTemplate } from '../utils/templateRenderer';
 export async function listTemplates(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const result = await pool.query(
-      'SELECT id, name, subject, variables, version, is_active, created_at, updated_at FROM templates WHERE is_active = true ORDER BY updated_at DESC'
+      'SELECT id, name, subject, html_body, variables, version, is_active, created_at, updated_at FROM templates WHERE is_active = true ORDER BY updated_at DESC'
     );
     res.json({ templates: result.rows });
   } catch (err) {
