@@ -1,4 +1,5 @@
 import { Worker, Job, UnrecoverableError } from 'bullmq';
+import fs from 'fs';
 import { config } from '../config';
 import { pool } from '../config/database';
 import { logger } from '../utils/logger';
@@ -8,10 +9,18 @@ import { createProvider } from '../services/email/providerFactory';
 import { emailSendQueue } from '../queues/emailQueue';
 import {
   PermanentBounceError, TemporaryBounceError, RateLimitError, AuthenticationError,
+  EmailAttachment,
 } from '../services/email/EmailProvider';
 
 interface DispatchJobData {
   campaignId: string;
+}
+
+interface AttachmentMeta {
+  filename: string;
+  storagePath: string;
+  size: number;
+  contentType: string;
 }
 
 interface SendJobData {
@@ -25,6 +34,7 @@ interface SendJobData {
   providerConfig: Record<string, unknown>;
   trackingToken: string;
   trackingDomain: string;
+  attachments?: AttachmentMeta[];
 }
 
 export function startCampaignDispatchWorker(): Worker {
@@ -62,6 +72,9 @@ export function startCampaignDispatchWorker(): Worker {
       // Load tracking domain
       const trackingResult = await pool.query("SELECT value FROM settings WHERE key = 'tracking_domain'");
       const trackingDomain = trackingResult.rows[0]?.value || 'http://localhost:3001';
+
+      // Load campaign attachments
+      const campaignAttachments: AttachmentMeta[] = campaign.attachments || [];
 
       // Load contacts from list (only active, not bounced/complained/unsubscribed)
       const contactsResult = await pool.query(
@@ -114,6 +127,7 @@ export function startCampaignDispatchWorker(): Worker {
           providerConfig,
           trackingToken,
           trackingDomain,
+          attachments: campaignAttachments,
         } as SendJobData, {
           // Rate limiting delay based on throttle settings
           delay: 0,
@@ -178,6 +192,22 @@ export function startEmailSendWorker(): Worker {
         'Feedback-ID': `${campaignId}:bulkmailer`,
       };
 
+      // Load attachments from disk
+      const emailAttachments: EmailAttachment[] = [];
+      if (job.data.attachments && job.data.attachments.length > 0) {
+        for (const att of job.data.attachments) {
+          if (fs.existsSync(att.storagePath)) {
+            emailAttachments.push({
+              filename: att.filename,
+              content: fs.readFileSync(att.storagePath),
+              contentType: att.contentType,
+            });
+          } else {
+            logger.warn(`Attachment file not found: ${att.storagePath}`, { filename: att.filename });
+          }
+        }
+      }
+
       // Send email - catch and classify errors
       const emailProvider = createProvider(provider, providerConfig);
       let result;
@@ -188,6 +218,7 @@ export function startEmailSendWorker(): Worker {
           html: trackedHtml,
           text: text || undefined,
           headers,
+          attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
         });
       } catch (sendErr) {
         // Permanent bounces should not be retried

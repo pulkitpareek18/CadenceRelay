@@ -44,6 +44,11 @@ export class GmailProvider implements EmailProvider {
       text: options.text,
       replyTo: options.replyTo || this.fromEmail,
       headers: options.headers || {},
+      attachments: options.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     };
 
     try {

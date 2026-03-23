@@ -45,9 +45,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-bulk_email_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-bulk_email}
       REDIS_URL: redis://redis:6379
       PORT: 3001
+      UPLOAD_DIR: /app/uploads
     env_file:
       - path: .env.production
         required: false
+    volumes:
+      - uploads:/app/uploads
     networks:
       - backend
       - frontend
@@ -67,9 +70,12 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-bulk_email_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-bulk_email}
       REDIS_URL: redis://redis:6379
+      UPLOAD_DIR: /app/uploads
     env_file:
       - path: .env.production
         required: false
+    volumes:
+      - uploads:/app/uploads
     networks:
       - backend
 
@@ -99,6 +105,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  uploads:
 
 networks:
   backend:

@@ -1,3 +1,9 @@
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
 export interface EmailOptions {
   to: string;
   subject: string;
@@ -6,6 +12,7 @@ export interface EmailOptions {
   from?: string;
   replyTo?: string;
   headers?: Record<string, string>;
+  attachments?: EmailAttachment[];
 }
 
 export interface SendResult {

@@ -23,8 +23,10 @@ export default function CampaignCreate() {
   const [scheduleError, setScheduleError] = useState('');
   const [creating, setCreating] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [attachments, setAttachments] = useState<File[]>([]);
 
   const previewRef = useRef<HTMLIFrameElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     listTemplates().then(setTemplates).catch(() => {});
@@ -74,6 +76,7 @@ export default function CampaignCreate() {
     try {
       const campaign = await createCampaign({
         name, templateId, listId, provider, throttlePerSecond, throttlePerHour,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       if (scheduleType === 'later' && scheduledAt) {
@@ -132,6 +135,46 @@ export default function CampaignCreate() {
               <button onClick={() => setProvider('ses')} className={`rounded-lg px-4 py-2 text-sm ${provider === 'ses' ? 'bg-primary-600 text-white' : 'bg-gray-100'}`}>AWS SES</button>
               <button onClick={() => setProvider('gmail')} className={`rounded-lg px-4 py-2 text-sm ${provider === 'gmail' ? 'bg-primary-600 text-white' : 'bg-gray-100'}`}>Gmail</button>
             </div>
+          </div>
+          {/* Attachments */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Attachments (optional)</label>
+            <p className="mt-0.5 text-xs text-gray-500">Add files to send with every email (max 25MB each, up to 10 files)</p>
+            <div className="mt-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  setAttachments((prev) => [...prev, ...files]);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 hover:border-gray-400 hover:bg-gray-50"
+              >
+                + Add Files
+              </button>
+            </div>
+            {attachments.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {attachments.map((file, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                      <span>{file.name}</span>
+                      <span className="text-xs text-gray-400">({(file.size / 1024).toFixed(0)} KB)</span>
+                    </div>
+                    <button onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                  </div>
+                ))}
+                <p className="text-xs text-gray-400">{attachments.length} file(s), {(attachments.reduce((s, f) => s + f.size, 0) / 1024 / 1024).toFixed(1)} MB total</p>
+              </div>
+            )}
           </div>
           <button disabled={!name || !listId} onClick={() => setStep(2)} className="rounded-lg bg-primary-600 px-6 py-2 text-sm text-white disabled:opacity-50">Next</button>
         </div>
@@ -242,6 +285,22 @@ export default function CampaignCreate() {
             <div><span className="text-gray-500">Schedule:</span> <span className="font-medium">{scheduleType === 'now' ? 'Send immediately' : new Date(scheduledAt).toLocaleString()}</span></div>
             <div><span className="text-gray-500">Throttle:</span> <span className="font-medium">{throttlePerSecond}/sec, {throttlePerHour}/hr</span></div>
           </div>
+
+          {/* Attachments in review */}
+          {attachments.length > 0 && (
+            <div className="rounded-lg bg-gray-50 p-3 text-sm">
+              <span className="text-gray-500">Attachments:</span>
+              <ul className="mt-1 space-y-0.5">
+                {attachments.map((f, i) => (
+                  <li key={i} className="flex items-center gap-1">
+                    <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                    <span className="font-medium">{f.name}</span>
+                    <span className="text-gray-400">({(f.size / 1024).toFixed(0)} KB)</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Estimated time in review */}
           <div className="rounded-lg bg-gray-50 p-3 text-sm">

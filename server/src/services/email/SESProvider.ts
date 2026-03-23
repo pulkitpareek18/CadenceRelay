@@ -1,4 +1,5 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { SESClient, SendRawEmailCommand } from '@aws-sdk/client-ses';
+import nodemailer from 'nodemailer';
 import {
   EmailProvider, EmailOptions, SendResult,
   PermanentBounceError, RateLimitError, AuthenticationError,
@@ -16,6 +17,7 @@ interface SESConfig {
 export class SESProvider implements EmailProvider {
   private client: SESClient;
   private fromEmail: string;
+  private transporter: nodemailer.Transporter;
 
   constructor(config: SESConfig) {
     this.fromEmail = config.fromEmail;
@@ -26,42 +28,45 @@ export class SESProvider implements EmailProvider {
         secretAccessKey: config.secretAccessKey,
       },
     });
+    // Use Nodemailer to build raw MIME messages (handles attachments, encoding, etc.)
+    this.transporter = nodemailer.createTransport({ streamTransport: true });
   }
 
   async send(options: EmailOptions): Promise<SendResult> {
-    const command = new SendEmailCommand({
-      Source: options.from || this.fromEmail,
-      Destination: {
-        ToAddresses: [options.to],
-      },
-      Message: {
-        Subject: {
-          Data: options.subject,
-          Charset: 'UTF-8',
-        },
-        Body: {
-          Html: {
-            Data: options.html,
-            Charset: 'UTF-8',
-          },
-          ...(options.text
-            ? {
-                Text: {
-                  Data: options.text,
-                  Charset: 'UTF-8',
-                },
-              }
-            : {}),
-        },
-      },
-      ReplyToAddresses: options.replyTo ? [options.replyTo] : undefined,
-    });
-
     try {
+      // Build the raw MIME email using Nodemailer (supports attachments, HTML, text, headers)
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: options.from || this.fromEmail,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+        replyTo: options.replyTo,
+        headers: options.headers || {},
+        attachments: options.attachments?.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+        })),
+      };
+
+      // Generate raw MIME message
+      const info = await this.transporter.sendMail(mailOptions);
+      const rawMessage = await streamToBuffer(info.message);
+
+      // Send via SES SendRawEmailCommand
+      const command = new SendRawEmailCommand({
+        RawMessage: {
+          Data: rawMessage,
+        },
+        Source: options.from || this.fromEmail,
+        Destinations: [options.to],
+      });
+
       const response = await this.client.send(command);
       const messageId = response.MessageId || '';
 
-      logger.debug('SES: Email sent', { messageId, to: options.to });
+      logger.debug('SES: Email sent (raw)', { messageId, to: options.to, hasAttachments: !!(options.attachments?.length) });
 
       return {
         messageId,
@@ -71,9 +76,7 @@ export class SESProvider implements EmailProvider {
       const err = error as { name?: string; message: string; $metadata?: { httpStatusCode?: number } };
       const statusCode = err.$metadata?.httpStatusCode;
 
-      // Classify SES errors
       if (err.name === 'MessageRejected') {
-        // Could be blacklisted recipient, content policy violation, etc.
         if (err.message?.includes('Email address is not verified') ||
             err.message?.includes('not authorized')) {
           throw new AuthenticationError(`SES: ${err.message}`);
@@ -113,4 +116,14 @@ export class SESProvider implements EmailProvider {
       return false;
     }
   }
+}
+
+// Helper to convert Nodemailer stream to Buffer
+function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
 }
