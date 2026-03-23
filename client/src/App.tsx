@@ -12,6 +12,7 @@ import TemplateEditor from './pages/TemplateEditor';
 import Campaigns from './pages/Campaigns';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
+import Analytics from './pages/Analytics';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('accessToken');
@@ -41,7 +42,7 @@ export default function App() {
                   <Route path="/templates" element={<Templates />} />
                   <Route path="/templates/new" element={<TemplateEditor />} />
                   <Route path="/templates/:id/edit" element={<TemplateEditor />} />
-                  <Route path="/analytics" element={<div className="p-6">Analytics (Sprint 7)</div>} />
+                  <Route path="/analytics" element={<Analytics />} />
                   <Route path="/settings" element={<Settings />} />
                 </Routes>
               </DashboardLayout>

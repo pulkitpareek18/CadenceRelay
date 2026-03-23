@@ -6,6 +6,7 @@ import contactsRoutes from './contacts.routes';
 import listsRoutes from './lists.routes';
 import templatesRoutes from './templates.routes';
 import campaignsRoutes from './campaigns.routes';
+import analyticsRoutes from './analytics.routes';
 import trackingRoutes from './tracking.routes';
 import webhookRoutes from './webhooks.routes';
 
@@ -34,7 +35,6 @@ router.use('/campaigns', authenticate, campaignsRoutes);
 router.use('/t', trackingRoutes);
 router.use('/webhooks', webhookRoutes);
 
-// TODO: Sprint 7
-// router.use('/analytics', authenticate, analyticsRoutes);
+router.use('/analytics', authenticate, analyticsRoutes);
 
 export default router;
