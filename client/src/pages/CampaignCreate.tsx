@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { createCampaign, scheduleCampaign, sendCampaign } from '../api/campaigns.api';
@@ -20,14 +20,56 @@ export default function CampaignCreate() {
   const [throttlePerHour, setThrottlePerHour] = useState(5000);
   const [scheduleType, setScheduleType] = useState<'now' | 'later'>('now');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduleError, setScheduleError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const previewRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     listTemplates().then(setTemplates).catch(() => {});
     listLists().then(setLists).catch(() => {});
   }, []);
 
+  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const selectedList = lists.find((l) => l.id === listId);
+
+  // Update preview iframe when template changes
+  useEffect(() => {
+    if (previewRef.current && selectedTemplate) {
+      const doc = previewRef.current.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(selectedTemplate.html_body);
+        doc.close();
+      }
+    }
+  }, [selectedTemplate]);
+
+  function validateScheduleDate(): boolean {
+    if (scheduleType === 'later') {
+      if (!scheduledAt) {
+        setScheduleError('Please select a date and time');
+        return false;
+      }
+      const selected = new Date(scheduledAt);
+      if (selected <= new Date()) {
+        setScheduleError('Scheduled date must be in the future');
+        return false;
+      }
+    }
+    setScheduleError('');
+    return true;
+  }
+
+  function handleGoToReview() {
+    if (!validateScheduleDate()) return;
+    setStep(4);
+  }
+
   async function handleCreate() {
+    if (scheduleType === 'later' && !validateScheduleDate()) return;
+
     setCreating(true);
     try {
       const campaign = await createCampaign({
@@ -47,11 +89,14 @@ export default function CampaignCreate() {
       toast.error('Failed to create campaign');
     } finally {
       setCreating(false);
+      setShowConfirm(false);
     }
   }
 
-  const selectedTemplate = templates.find((t) => t.id === templateId);
-  const selectedList = lists.find((l) => l.id === listId);
+  const contactCount = selectedList?.contact_count || 0;
+  const estimatedMinutes = Math.ceil(contactCount / throttlePerSecond / 60);
+  const estimatedHours = Math.floor(estimatedMinutes / 60);
+  const estimatedMinsRemainder = estimatedMinutes % 60;
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -104,6 +149,23 @@ export default function CampaignCreate() {
               </div>
             ))}
           </div>
+          {/* Template Preview */}
+          {selectedTemplate && (
+            <div className="mt-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Template Preview</h4>
+              <div className="rounded-lg border bg-gray-50 p-2">
+                <div className="mb-2 text-xs text-gray-500">
+                  <span className="font-medium">Subject:</span> {selectedTemplate.subject}
+                </div>
+                <iframe
+                  ref={previewRef}
+                  className="h-64 w-full rounded border bg-white"
+                  title="Template Preview"
+                  sandbox="allow-same-origin"
+                />
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
             <button onClick={() => setStep(1)} className="rounded-lg border px-6 py-2 text-sm">Back</button>
             <button disabled={!templateId} onClick={() => setStep(3)} className="rounded-lg bg-primary-600 px-6 py-2 text-sm text-white disabled:opacity-50">Next</button>
@@ -117,32 +179,53 @@ export default function CampaignCreate() {
           <div>
             <label className="block text-sm font-medium text-gray-700">When to send?</label>
             <div className="mt-2 flex gap-3">
-              <button onClick={() => setScheduleType('now')} className={`rounded-lg px-4 py-2 text-sm ${scheduleType === 'now' ? 'bg-primary-600 text-white' : 'bg-gray-100'}`}>Send Now</button>
+              <button onClick={() => { setScheduleType('now'); setScheduleError(''); }} className={`rounded-lg px-4 py-2 text-sm ${scheduleType === 'now' ? 'bg-primary-600 text-white' : 'bg-gray-100'}`}>Send Now</button>
               <button onClick={() => setScheduleType('later')} className={`rounded-lg px-4 py-2 text-sm ${scheduleType === 'later' ? 'bg-primary-600 text-white' : 'bg-gray-100'}`}>Schedule</button>
             </div>
           </div>
           {scheduleType === 'later' && (
             <div>
               <label className="block text-sm font-medium text-gray-700">Schedule Date & Time</label>
-              <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="mt-1 rounded-lg border px-3 py-2 text-sm" />
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => { setScheduledAt(e.target.value); setScheduleError(''); }}
+                min={new Date().toISOString().slice(0, 16)}
+                className={`mt-1 rounded-lg border px-3 py-2 text-sm ${scheduleError ? 'border-red-300' : ''}`}
+              />
+              {scheduleError && <p className="mt-1 text-xs text-red-500">{scheduleError}</p>}
             </div>
           )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">Emails per Second</label>
-              <input type="number" value={throttlePerSecond} onChange={(e) => setThrottlePerSecond(parseInt(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+              <input type="number" value={throttlePerSecond} onChange={(e) => setThrottlePerSecond(parseInt(e.target.value) || 1)} min={1} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Emails per Hour</label>
-              <input type="number" value={throttlePerHour} onChange={(e) => setThrottlePerHour(parseInt(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+              <input type="number" value={throttlePerHour} onChange={(e) => setThrottlePerHour(parseInt(e.target.value) || 1)} min={1} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </div>
           </div>
-          <p className="text-xs text-gray-500">
-            At {throttlePerSecond} emails/sec, {selectedList?.contact_count || 0} emails will take ~{Math.ceil((selectedList?.contact_count || 0) / throttlePerSecond / 60)} minutes
-          </p>
+
+          {/* Estimated time - more visible */}
+          <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <span className="text-sm font-medium text-blue-800">Estimated send time</span>
+            </div>
+            <p className="mt-1 text-lg font-semibold text-blue-900">
+              {contactCount === 0
+                ? 'No contacts in selected list'
+                : estimatedHours > 0
+                  ? `~${estimatedHours}h ${estimatedMinsRemainder}m for ${contactCount.toLocaleString()} emails`
+                  : `~${estimatedMinutes} minute(s) for ${contactCount.toLocaleString()} emails`}
+            </p>
+            <p className="mt-0.5 text-xs text-blue-600">At {throttlePerSecond} emails/sec</p>
+          </div>
+
           <div className="flex gap-2">
             <button onClick={() => setStep(2)} className="rounded-lg border px-6 py-2 text-sm">Back</button>
-            <button onClick={() => setStep(4)} className="rounded-lg bg-primary-600 px-6 py-2 text-sm text-white">Review</button>
+            <button onClick={handleGoToReview} className="rounded-lg bg-primary-600 px-6 py-2 text-sm text-white">Review</button>
           </div>
         </div>
       )}
@@ -159,11 +242,49 @@ export default function CampaignCreate() {
             <div><span className="text-gray-500">Schedule:</span> <span className="font-medium">{scheduleType === 'now' ? 'Send immediately' : new Date(scheduledAt).toLocaleString()}</span></div>
             <div><span className="text-gray-500">Throttle:</span> <span className="font-medium">{throttlePerSecond}/sec, {throttlePerHour}/hr</span></div>
           </div>
+
+          {/* Estimated time in review */}
+          <div className="rounded-lg bg-gray-50 p-3 text-sm">
+            <span className="text-gray-500">Estimated time:</span>{' '}
+            <span className="font-medium">
+              {estimatedHours > 0
+                ? `~${estimatedHours}h ${estimatedMinsRemainder}m`
+                : `~${estimatedMinutes} minute(s)`}
+            </span>
+          </div>
+
           <div className="flex gap-2">
             <button onClick={() => setStep(3)} className="rounded-lg border px-6 py-2 text-sm">Back</button>
-            <button onClick={handleCreate} disabled={creating} className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50">
+            <button onClick={() => setShowConfirm(true)} disabled={creating} className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50">
               {creating ? 'Creating...' : scheduleType === 'now' ? 'Send Now' : 'Schedule Campaign'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Dialog */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white p-6">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {scheduleType === 'now' ? 'Confirm Send' : 'Confirm Schedule'}
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              {scheduleType === 'now'
+                ? `This will immediately start sending ${contactCount.toLocaleString()} emails using ${provider.toUpperCase()}. This action cannot be undone.`
+                : `This will schedule ${contactCount.toLocaleString()} emails to be sent on ${new Date(scheduledAt).toLocaleString()} using ${provider.toUpperCase()}.`}
+            </p>
+            <div className="mt-4 rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
+              <strong>Campaign:</strong> {name}<br />
+              <strong>Template:</strong> {selectedTemplate?.name}<br />
+              <strong>List:</strong> {selectedList?.name} ({contactCount} contacts)
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowConfirm(false)} className="rounded-lg border px-4 py-2 text-sm">Cancel</button>
+              <button onClick={handleCreate} disabled={creating} className="rounded-lg bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50">
+                {creating ? 'Processing...' : 'Yes, proceed'}
+              </button>
+            </div>
           </div>
         </div>
       )}

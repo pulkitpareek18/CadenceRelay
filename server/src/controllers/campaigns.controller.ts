@@ -80,6 +80,7 @@ export async function updateCampaign(req: Request, res: Response, next: NextFunc
 
     const existing = await pool.query('SELECT status FROM campaigns WHERE id = $1', [id]);
     if (existing.rows.length === 0) throw new AppError('Campaign not found', 404);
+    // FIX: Already correct - only allow editing draft/scheduled campaigns
     if (!['draft', 'scheduled'].includes(existing.rows[0].status)) {
       throw new AppError('Can only edit draft or scheduled campaigns', 400);
     }
@@ -122,6 +123,18 @@ export async function scheduleCampaign(req: Request, res: Response, next: NextFu
     const { id } = req.params;
     const { scheduledAt } = req.body;
 
+    // FIX: Validate scheduledAt is in the future
+    if (!scheduledAt) {
+      throw new AppError('scheduledAt is required', 400);
+    }
+    const scheduledDate = new Date(scheduledAt);
+    if (isNaN(scheduledDate.getTime())) {
+      throw new AppError('scheduledAt must be a valid date', 400);
+    }
+    if (scheduledDate <= new Date()) {
+      throw new AppError('scheduledAt must be in the future', 400);
+    }
+
     const existing = await pool.query('SELECT status, template_id, list_id FROM campaigns WHERE id = $1', [id]);
     if (existing.rows.length === 0) throw new AppError('Campaign not found', 404);
     if (!['draft', 'scheduled'].includes(existing.rows[0].status)) {
@@ -129,6 +142,16 @@ export async function scheduleCampaign(req: Request, res: Response, next: NextFu
     }
     if (!existing.rows[0].template_id || !existing.rows[0].list_id) {
       throw new AppError('Campaign must have a template and list before scheduling', 400);
+    }
+
+    // FIX: Validate template and list still exist
+    const templateCheck = await pool.query('SELECT id FROM templates WHERE id = $1 AND is_active = true', [existing.rows[0].template_id]);
+    if (templateCheck.rows.length === 0) {
+      throw new AppError('The assigned template no longer exists or has been deactivated', 400);
+    }
+    const listCheck = await pool.query('SELECT id FROM contact_lists WHERE id = $1', [existing.rows[0].list_id]);
+    if (listCheck.rows.length === 0) {
+      throw new AppError('The assigned contact list no longer exists', 400);
     }
 
     await pool.query(
@@ -153,6 +176,16 @@ export async function sendCampaign(req: Request, res: Response, next: NextFuncti
     }
     if (!existing.rows[0].template_id || !existing.rows[0].list_id) {
       throw new AppError('Campaign must have a template and list', 400);
+    }
+
+    // FIX: Validate template and list still exist before sending
+    const templateCheck = await pool.query('SELECT id FROM templates WHERE id = $1 AND is_active = true', [existing.rows[0].template_id]);
+    if (templateCheck.rows.length === 0) {
+      throw new AppError('The assigned template no longer exists or has been deactivated', 400);
+    }
+    const listCheck = await pool.query('SELECT id FROM contact_lists WHERE id = $1', [existing.rows[0].list_id]);
+    if (listCheck.rows.length === 0) {
+      throw new AppError('The assigned contact list no longer exists', 400);
     }
 
     await pool.query(
@@ -185,11 +218,24 @@ export async function pauseCampaign(req: Request, res: Response, next: NextFunct
 export async function resumeCampaign(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      "UPDATE campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1 AND status = 'paused' RETURNING id",
+
+    // FIX: Validate template and list still exist before resuming
+    const existing = await pool.query('SELECT template_id, list_id FROM campaigns WHERE id = $1 AND status = $2', [id, 'paused']);
+    if (existing.rows.length === 0) throw new AppError('Campaign not found or not paused', 400);
+
+    const templateCheck = await pool.query('SELECT id FROM templates WHERE id = $1 AND is_active = true', [existing.rows[0].template_id]);
+    if (templateCheck.rows.length === 0) {
+      throw new AppError('The assigned template no longer exists or has been deactivated', 400);
+    }
+    const listCheck = await pool.query('SELECT id FROM contact_lists WHERE id = $1', [existing.rows[0].list_id]);
+    if (listCheck.rows.length === 0) {
+      throw new AppError('The assigned contact list no longer exists', 400);
+    }
+
+    await pool.query(
+      "UPDATE campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1",
       [id]
     );
-    if (result.rows.length === 0) throw new AppError('Campaign not found or not paused', 400);
 
     await campaignDispatchQueue.add('dispatch', { campaignId: id });
     res.json({ message: 'Campaign resumed' });

@@ -117,11 +117,21 @@ export async function createContact(req: Request, res: Response, next: NextFunct
 
     const contact = result.rows[0];
 
+    // FIX: Properly expand parameterized VALUES for multiple listIds
     if (listIds && listIds.length > 0) {
-      const values = listIds.map((_: string, i: number) => `($1, $${i + 2})`).join(', ');
+      const valuesPlaceholders: string[] = [];
+      const queryParams: unknown[] = [];
+      let paramIdx = 1;
+
+      for (const listId of listIds) {
+        valuesPlaceholders.push(`($${paramIdx}, $${paramIdx + 1})`);
+        queryParams.push(contact.id, listId);
+        paramIdx += 2;
+      }
+
       await pool.query(
-        `INSERT INTO contact_list_members (contact_id, list_id) VALUES ${values} ON CONFLICT DO NOTHING`,
-        [contact.id, ...listIds]
+        `INSERT INTO contact_list_members (contact_id, list_id) VALUES ${valuesPlaceholders.join(', ')} ON CONFLICT DO NOTHING`,
+        queryParams
       );
       // Update list counts
       await pool.query(
@@ -141,11 +151,12 @@ export async function updateContact(req: Request, res: Response, next: NextFunct
     const { id } = req.params;
     const { email, name, metadata, status } = req.body;
 
+    // FIX: Pass metadata as a proper JSON object (not stringified) so COALESCE works correctly with the jsonb column
     const result = await pool.query(
       `UPDATE contacts SET
         email = COALESCE($1, email),
         name = COALESCE($2, name),
-        metadata = COALESCE($3, metadata),
+        metadata = COALESCE($3::jsonb, metadata),
         status = COALESCE($4, status),
         updated_at = NOW()
        WHERE id = $5 RETURNING *`,
@@ -175,6 +186,45 @@ export async function deleteContact(req: Request, res: Response, next: NextFunct
   }
 }
 
+// FIX: Proper CSV field parsing that handles quoted fields
+function parseCSVLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++; // skip escaped quote
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        fields.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+// FIX: Proper email validation using a reasonable regex
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export async function importContacts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const file = req.file;
@@ -190,7 +240,8 @@ export async function importContacts(req: Request, res: Response, next: NextFunc
       throw new AppError('CSV must have a header row and at least one data row', 400);
     }
 
-    const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+    // FIX: Use proper CSV parsing for headers too
+    const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase());
     const emailIdx = headers.indexOf('email');
     const nameIdx = headers.indexOf('name');
 
@@ -203,13 +254,15 @@ export async function importContacts(req: Request, res: Response, next: NextFunc
     const errors: string[] = [];
 
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map((c) => c.trim());
-      const email = cols[emailIdx];
-      const name = nameIdx >= 0 ? cols[nameIdx] : null;
+      // FIX: Use proper CSV parsing instead of naive split(',')
+      const cols = parseCSVLine(lines[i]);
+      const email = cols[emailIdx]?.trim();
+      const name = nameIdx >= 0 ? cols[nameIdx]?.trim() || null : null;
 
-      if (!email || !email.includes('@')) {
+      // FIX: Proper email validation instead of just checking for '@'
+      if (!email || !isValidEmail(email)) {
         skipped++;
-        errors.push(`Row ${i + 1}: Invalid email "${email}"`);
+        errors.push(`Row ${i + 1}: Invalid email "${email || ''}"`);
         continue;
       }
 
@@ -247,6 +300,16 @@ export async function importContacts(req: Request, res: Response, next: NextFunc
   }
 }
 
+// FIX: Proper CSV field escaping for values containing quotes or commas
+function escapeCSVField(value: string | null | undefined): string {
+  if (value == null) return '';
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
 export async function exportContacts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { listId } = req.query;
@@ -264,8 +327,19 @@ export async function exportContacts(req: Request, res: Response, next: NextFunc
     const result = await pool.query(query, params);
 
     const csvHeader = 'email,name,status,send_count,bounce_count,last_sent_at,created_at\n';
+    // FIX: Properly escape all fields in CSV output
     const csvRows = result.rows
-      .map((r) => `${r.email},"${r.name || ''}",${r.status},${r.send_count},${r.bounce_count},${r.last_sent_at || ''},${r.created_at}`)
+      .map((r) =>
+        [
+          escapeCSVField(r.email),
+          escapeCSVField(r.name),
+          escapeCSVField(r.status),
+          r.send_count,
+          r.bounce_count,
+          r.last_sent_at || '',
+          r.created_at,
+        ].join(',')
+      )
       .join('\n');
 
     res.setHeader('Content-Type', 'text/csv');

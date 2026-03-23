@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { pool } from '../config/database';
+import { AppError } from '../middleware/errorHandler';
 
 export async function getDashboard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -7,11 +8,20 @@ export async function getDashboard(req: Request, res: Response, next: NextFuncti
     let dateFilter = '';
     const params: unknown[] = [];
 
+    // FIX: Validate date params
     if (from) {
+      const fromDate = new Date(from as string);
+      if (isNaN(fromDate.getTime())) {
+        throw new AppError('Invalid "from" date parameter', 400);
+      }
       params.push(from);
       dateFilter += ` AND c.created_at >= $${params.length}`;
     }
     if (to) {
+      const toDate = new Date(to as string);
+      if (isNaN(toDate.getTime())) {
+        throw new AppError('Invalid "to" date parameter', 400);
+      }
       params.push(to);
       dateFilter += ` AND c.created_at <= $${params.length}`;
     }
@@ -32,7 +42,20 @@ export async function getDashboard(req: Request, res: Response, next: NextFuncti
       params
     );
 
-    const stats = statsResult.rows[0];
+    const rawStats = statsResult.rows[0];
+
+    // FIX: Parse string values from postgres SUM/COALESCE to numbers
+    const stats = {
+      total_sent: Number(rawStats.total_sent),
+      total_bounced: Number(rawStats.total_bounced),
+      total_opens: Number(rawStats.total_opens),
+      total_clicks: Number(rawStats.total_clicks),
+      total_complaints: Number(rawStats.total_complaints),
+      total_failed: Number(rawStats.total_failed),
+      total_unsubscribes: Number(rawStats.total_unsubscribes),
+      total_campaigns: Number(rawStats.total_campaigns),
+    };
+
     const openRate = stats.total_sent > 0 ? ((stats.total_opens / stats.total_sent) * 100).toFixed(1) : '0';
     const clickRate = stats.total_sent > 0 ? ((stats.total_clicks / stats.total_sent) * 100).toFixed(1) : '0';
     const bounceRate = stats.total_sent > 0 ? ((stats.total_bounced / stats.total_sent) * 100).toFixed(1) : '0';

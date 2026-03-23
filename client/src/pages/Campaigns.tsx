@@ -71,6 +71,7 @@ export default function Campaigns() {
       </div>
 
       <div className="mt-4 overflow-hidden rounded-xl bg-white shadow-sm">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
@@ -109,6 +110,7 @@ export default function Campaigns() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {totalPages > 1 && (

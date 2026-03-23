@@ -58,7 +58,11 @@ export async function updateTemplate(req: Request, res: Response, next: NextFunc
     if (existing.rows.length === 0) throw new AppError('Template not found', 404);
 
     const newVersion = existing.rows[0].version + 1;
-    const variables = htmlBody ? detectVariables(htmlBody) : existing.rows[0].variables;
+
+    // FIX: Always detect variables from the ACTUAL body being saved, not conditionally.
+    // Determine the effective html_body that will be stored after COALESCE.
+    const effectiveHtmlBody = htmlBody || existing.rows[0].html_body;
+    const variables = detectVariables(effectiveHtmlBody);
 
     const result = await pool.query(
       `UPDATE templates SET
@@ -116,9 +120,16 @@ export async function getTemplateVersions(req: Request, res: Response, next: Nex
 export async function getTemplateVersion(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { id, version } = req.params;
+
+    // FIX: Validate that version is a valid number
+    const versionNum = parseInt(version);
+    if (isNaN(versionNum) || versionNum < 1) {
+      throw new AppError('Invalid version number', 400);
+    }
+
     const result = await pool.query(
       'SELECT * FROM template_versions WHERE template_id = $1 AND version = $2',
-      [id, parseInt(version)]
+      [id, versionNum]
     );
     if (result.rows.length === 0) throw new AppError('Version not found', 404);
     res.json({ version: result.rows[0] });

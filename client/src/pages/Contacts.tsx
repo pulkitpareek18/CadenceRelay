@@ -4,6 +4,10 @@ import toast from 'react-hot-toast';
 import { listContacts, importContacts, exportContacts, createContact, deleteContact, Contact } from '../api/contacts.api';
 import { listLists, ContactList } from '../api/lists.api';
 
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export default function Contacts() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [lists, setLists] = useState<ContactList[]>([]);
@@ -17,6 +21,8 @@ export default function Contacts() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
+  const [newListId, setNewListId] = useState('');
+  const [emailError, setEmailError] = useState('');
   const navigate = useNavigate();
 
   const fetchContacts = useCallback(async () => {
@@ -40,12 +46,23 @@ export default function Contacts() {
   useEffect(() => { listLists().then(setLists).catch(() => {}); }, []);
 
   async function handleAdd() {
+    if (!newEmail.trim()) {
+      setEmailError('Email is required');
+      return;
+    }
+    if (!isValidEmail(newEmail)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+    setEmailError('');
     try {
-      await createContact({ email: newEmail, name: newName || undefined });
+      await createContact({ email: newEmail, name: newName || undefined, listIds: newListId ? [newListId] : undefined });
       toast.success('Contact added');
       setShowAddModal(false);
       setNewEmail('');
       setNewName('');
+      setNewListId('');
+      setEmailError('');
       fetchContacts();
     } catch {
       toast.error('Failed to add contact');
@@ -108,43 +125,56 @@ export default function Contacts() {
 
       {/* Table */}
       <div className="mt-4 overflow-hidden rounded-xl bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Sent</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Bounced</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
-            ) : contacts.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No contacts found</td></tr>
-            ) : contacts.map((c) => (
-              <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/contacts/${c.id}`)}>
-                <td className="px-4 py-3">{c.email}</td>
-                <td className="px-4 py-3">{c.name || '-'}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                    c.status === 'active' ? 'bg-green-100 text-green-700' :
-                    c.status === 'bounced' ? 'bg-red-100 text-red-700' :
-                    c.status === 'complained' ? 'bg-orange-100 text-orange-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>{c.status}</span>
-                </td>
-                <td className="px-4 py-3">{c.send_count}</td>
-                <td className="px-4 py-3">{c.bounce_count}</td>
-                <td className="px-4 py-3">
-                  <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} className="text-red-600 hover:text-red-800 text-xs">Delete</button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Sent</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Bounced</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              ) : contacts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center">
+                    <div className="text-gray-400">
+                      <p className="text-lg font-medium">No contacts found</p>
+                      <p className="mt-1 text-sm">
+                        {search || statusFilter || listFilter
+                          ? 'Try adjusting your search filters'
+                          : 'Get started by adding your first contact or importing a CSV file'}
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : contacts.map((c) => (
+                <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/contacts/${c.id}`)}>
+                  <td className="px-4 py-3">{c.email}</td>
+                  <td className="px-4 py-3">{c.name || '-'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                      c.status === 'active' ? 'bg-green-100 text-green-700' :
+                      c.status === 'bounced' ? 'bg-red-100 text-red-700' :
+                      c.status === 'complained' ? 'bg-orange-100 text-orange-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>{c.status}</span>
+                  </td>
+                  <td className="px-4 py-3">{c.send_count}</td>
+                  <td className="px-4 py-3">{c.bounce_count}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} className="text-red-600 hover:text-red-800 text-xs">Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
@@ -152,15 +182,15 @@ export default function Contacts() {
         <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
           <span>{total} contacts total</span>
           <div className="flex gap-2">
-            <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded border px-3 py-1 disabled:opacity-50">Prev</button>
+            <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Prev</button>
             <span className="px-3 py-1">Page {page} of {totalPages}</span>
-            <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="rounded border px-3 py-1 disabled:opacity-50">Next</button>
+            <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Next</button>
           </div>
         </div>
       )}
 
       {/* Import Modal */}
-      {showImportModal && <ImportModal lists={lists} onClose={() => setShowImportModal(false)} onDone={() => { setShowImportModal(false); fetchContacts(); }} />}
+      {showImportModal && <ImportModal lists={lists} onClose={() => setShowImportModal(false)} onDone={fetchContacts} />}
 
       {/* Add Modal */}
       {showAddModal && (
@@ -168,11 +198,24 @@ export default function Contacts() {
           <div className="w-full max-w-md rounded-xl bg-white p-6">
             <h3 className="text-lg font-semibold">Add Contact</h3>
             <div className="mt-4 space-y-3">
-              <input type="email" placeholder="Email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <div>
+                <input
+                  type="email"
+                  placeholder="Email *"
+                  value={newEmail}
+                  onChange={(e) => { setNewEmail(e.target.value); setEmailError(''); }}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm ${emailError ? 'border-red-300 focus:border-red-500' : 'focus:border-primary-500'} focus:outline-none`}
+                />
+                {emailError && <p className="mt-1 text-xs text-red-500">{emailError}</p>}
+              </div>
               <input type="text" placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <select value={newListId} onChange={(e) => setNewListId(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
+                <option value="">No list</option>
+                {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setShowAddModal(false)} className="rounded-lg border px-4 py-2 text-sm">Cancel</button>
+              <button onClick={() => { setShowAddModal(false); setEmailError(''); setNewEmail(''); setNewName(''); setNewListId(''); }} className="rounded-lg border px-4 py-2 text-sm">Cancel</button>
               <button onClick={handleAdd} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white">Add</button>
             </div>
           </div>
@@ -219,7 +262,11 @@ function ImportModal({ lists, onClose, onDone }: { lists: ContactList[]; onClose
         </div>
         {result && (
           <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm">
-            <p>Imported: {result.imported} | Skipped: {result.skipped}</p>
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              <span className="font-medium text-green-700">Import complete</span>
+            </div>
+            <p className="mt-1">Imported: <span className="font-medium">{result.imported}</span> | Skipped: <span className="font-medium">{result.skipped}</span></p>
             {result.errors.length > 0 && (
               <details className="mt-1">
                 <summary className="text-red-600 cursor-pointer">Errors ({result.errors.length})</summary>
@@ -229,10 +276,14 @@ function ImportModal({ lists, onClose, onDone }: { lists: ContactList[]; onClose
           </div>
         )}
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">Close</button>
-          <button onClick={handleImport} disabled={!file || importing} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white disabled:opacity-50">
-            {importing ? 'Importing...' : 'Import'}
+          <button onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">
+            {result ? 'Close' : 'Cancel'}
           </button>
+          {!result && (
+            <button onClick={handleImport} disabled={!file || importing} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white disabled:opacity-50">
+              {importing ? 'Importing...' : 'Import'}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -66,6 +66,7 @@ export default function ContactDetail() {
         {history.length === 0 ? (
           <p className="mt-4 text-center text-gray-400">No emails sent to this contact yet</p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="mt-4 w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
@@ -78,7 +79,7 @@ export default function ContactDetail() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {history.map((h, i) => (
-                <tr key={i}>
+                <tr key={i} className="hover:bg-gray-50">
                   <td className="px-4 py-2">{h.campaign_name}</td>
                   <td className="px-4 py-2">{h.status}</td>
                   <td className="px-4 py-2">{h.sent_at ? new Date(h.sent_at).toLocaleString() : '-'}</td>
@@ -88,6 +89,7 @@ export default function ContactDetail() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

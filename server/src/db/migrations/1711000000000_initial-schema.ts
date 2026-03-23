@@ -28,7 +28,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     metadata: { type: 'jsonb', default: pgm.func("'{}'::jsonb") },
     status: {
       type: 'varchar(20)',
-      default: "'active'",
+      default: pgm.func("'active'"),
       notNull: true,
       check: "status IN ('active', 'bounced', 'complained', 'unsubscribed')",
     },
@@ -119,13 +119,13 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     list_id: { type: 'uuid', references: 'contact_lists' },
     status: {
       type: 'varchar(20)',
-      default: "'draft'",
+      default: pgm.func("'draft'"),
       notNull: true,
       check: "status IN ('draft','scheduled','sending','paused','completed','failed')",
     },
     provider: {
       type: 'varchar(10)',
-      default: "'ses'",
+      default: pgm.func("'ses'"),
       notNull: true,
       check: "provider IN ('gmail', 'ses')",
     },
@@ -160,7 +160,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     email: { type: 'varchar(320)', notNull: true },
     status: {
       type: 'varchar(20)',
-      default: "'pending'",
+      default: pgm.func("'pending'"),
       notNull: true,
       check: "status IN ('pending','queued','sent','delivered','bounced','failed','opened','clicked','complained','unsubscribed')",
     },

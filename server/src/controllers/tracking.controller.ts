@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 // 1x1 transparent GIF pixel
 const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 
-export async function trackOpen(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function trackOpen(req: Request, res: Response, _next: NextFunction): Promise<void> {
   try {
     const { token } = req.params;
 
@@ -17,22 +17,35 @@ export async function trackOpen(req: Request, res: Response, next: NextFunction)
     if (result.rows.length > 0) {
       const recipient = result.rows[0];
 
-      // Record event
-      await pool.query(
-        "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type, ip_address, user_agent) VALUES ($1, $2, 'opened', $3, $4)",
-        [recipient.id, recipient.campaign_id, req.ip, req.get('user-agent')]
-      );
+      // FIX: Use a transaction so event insert + counter updates are atomic
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      // Update first open timestamp
-      if (!recipient.opened_at) {
-        await pool.query(
-          "UPDATE campaign_recipients SET status = 'opened', opened_at = NOW() WHERE id = $1",
-          [recipient.id]
+        // Record event
+        await client.query(
+          "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type, ip_address, user_agent) VALUES ($1, $2, 'opened', $3, $4)",
+          [recipient.id, recipient.campaign_id, req.ip, req.get('user-agent')]
         );
-        await pool.query(
-          'UPDATE campaigns SET open_count = open_count + 1, updated_at = NOW() WHERE id = $1',
-          [recipient.campaign_id]
-        );
+
+        // Update first open timestamp
+        if (!recipient.opened_at) {
+          await client.query(
+            "UPDATE campaign_recipients SET status = 'opened', opened_at = NOW() WHERE id = $1",
+            [recipient.id]
+          );
+          await client.query(
+            'UPDATE campaigns SET open_count = open_count + 1, updated_at = NOW() WHERE id = $1',
+            [recipient.campaign_id]
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
       }
     }
 
@@ -55,7 +68,13 @@ export async function trackOpen(req: Request, res: Response, next: NextFunction)
 export async function trackClick(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { token, linkIndex } = req.params;
+
+    // FIX: Validate linkIndex is a valid non-negative integer
     const idx = parseInt(linkIndex);
+    if (isNaN(idx) || idx < 0) {
+      res.status(400).send('Invalid link index');
+      return;
+    }
 
     const result = await pool.query(
       'SELECT id, campaign_id, link_urls, clicked_at FROM campaign_recipients WHERE tracking_token = $1',
@@ -69,6 +88,13 @@ export async function trackClick(req: Request, res: Response, next: NextFunction
 
     const recipient = result.rows[0];
     const linkUrls = recipient.link_urls || [];
+
+    // FIX: Bounds check on linkIndex
+    if (idx >= linkUrls.length) {
+      res.status(404).send('Link not found');
+      return;
+    }
+
     const originalUrl = linkUrls[idx];
 
     if (!originalUrl) {
@@ -76,22 +102,35 @@ export async function trackClick(req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // Record event
-    await pool.query(
-      "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type, metadata, ip_address, user_agent) VALUES ($1, $2, 'clicked', $3, $4, $5)",
-      [recipient.id, recipient.campaign_id, JSON.stringify({ url: originalUrl, linkIndex: idx }), req.ip, req.get('user-agent')]
-    );
+    // FIX: Use a transaction so event insert + counter updates are atomic
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    // Update first click timestamp
-    if (!recipient.clicked_at) {
-      await pool.query(
-        "UPDATE campaign_recipients SET status = 'clicked', clicked_at = NOW() WHERE id = $1",
-        [recipient.id]
+      // Record event
+      await client.query(
+        "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type, metadata, ip_address, user_agent) VALUES ($1, $2, 'clicked', $3, $4, $5)",
+        [recipient.id, recipient.campaign_id, JSON.stringify({ url: originalUrl, linkIndex: idx }), req.ip, req.get('user-agent')]
       );
-      await pool.query(
-        'UPDATE campaigns SET click_count = click_count + 1, updated_at = NOW() WHERE id = $1',
-        [recipient.campaign_id]
-      );
+
+      // Update first click timestamp
+      if (!recipient.clicked_at) {
+        await client.query(
+          "UPDATE campaign_recipients SET status = 'clicked', clicked_at = NOW() WHERE id = $1",
+          [recipient.id]
+        );
+        await client.query(
+          'UPDATE campaigns SET click_count = click_count + 1, updated_at = NOW() WHERE id = $1',
+          [recipient.campaign_id]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     res.redirect(302, originalUrl);

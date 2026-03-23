@@ -25,8 +25,17 @@ export async function handleSnsWebhook(req: Request, res: Response, next: NextFu
 
     // Handle notification
     if (messageType === 'Notification') {
-      const message = JSON.parse(req.body.Message || '{}');
-      const notificationType = message.notificationType;
+      // FIX: Add JSON.parse error handling
+      let message: Record<string, unknown>;
+      try {
+        message = JSON.parse(req.body.Message || '{}');
+      } catch (parseErr) {
+        logger.error('Failed to parse SNS message', { error: (parseErr as Error).message, raw: req.body.Message });
+        res.status(400).send('Invalid message format');
+        return;
+      }
+
+      const notificationType = message.notificationType as string | undefined;
 
       logger.info('SNS notification received', { type: notificationType });
 
@@ -75,58 +84,77 @@ export async function processSnsEvent(notificationType: string, message: Record<
       const bounceType = bounce?.bounceType || 'unknown';
       const diagnosticCode = bounce?.bouncedRecipients?.[0]?.diagnosticCode || '';
 
-      await pool.query(
-        "UPDATE campaign_recipients SET status = 'bounced', bounced_at = NOW(), error_message = $1 WHERE id = $2",
+      // FIX: Use idempotent updates - only process if not already bounced
+      const updateResult = await pool.query(
+        "UPDATE campaign_recipients SET status = 'bounced', bounced_at = NOW(), error_message = $1 WHERE id = $2 AND status != 'bounced' RETURNING id",
         [`${bounceType}: ${diagnosticCode}`, recipientId]
       );
-      await pool.query(
-        "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type, metadata) VALUES ($1, $2, 'bounced', $3)",
-        [recipientId, campaignId, JSON.stringify({ bounceType, diagnosticCode })]
-      );
-      await pool.query(
-        'UPDATE campaigns SET bounce_count = bounce_count + 1, updated_at = NOW() WHERE id = $1',
-        [campaignId]
-      );
 
-      // Mark contact as bounced on hard bounce
-      if (bounceType === 'Permanent') {
+      // Only insert event and increment counter if the status was actually changed
+      if (updateResult.rows.length > 0) {
         await pool.query(
-          "UPDATE contacts SET status = 'bounced', bounce_count = bounce_count + 1, updated_at = NOW() WHERE email = $1",
-          [email]
+          "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type, metadata) VALUES ($1, $2, 'bounced', $3)",
+          [recipientId, campaignId, JSON.stringify({ bounceType, diagnosticCode })]
         );
+        await pool.query(
+          'UPDATE campaigns SET bounce_count = bounce_count + 1, updated_at = NOW() WHERE id = $1',
+          [campaignId]
+        );
+
+        // Mark contact as bounced on hard bounce
+        if (bounceType === 'Permanent') {
+          await pool.query(
+            "UPDATE contacts SET status = 'bounced', bounce_count = bounce_count + 1, updated_at = NOW() WHERE email = $1",
+            [email]
+          );
+        }
+      } else {
+        logger.info('Duplicate bounce event ignored', { recipientId, messageId });
       }
       break;
     }
 
     case 'Complaint': {
-      await pool.query(
-        "UPDATE campaign_recipients SET status = 'complained' WHERE id = $1",
+      // FIX: Use idempotent updates - only process if not already complained
+      const updateResult = await pool.query(
+        "UPDATE campaign_recipients SET status = 'complained' WHERE id = $1 AND status != 'complained' RETURNING id",
         [recipientId]
       );
-      await pool.query(
-        "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type) VALUES ($1, $2, 'complained')",
-        [recipientId, campaignId]
-      );
-      await pool.query(
-        'UPDATE campaigns SET complaint_count = complaint_count + 1, updated_at = NOW() WHERE id = $1',
-        [campaignId]
-      );
-      await pool.query(
-        "UPDATE contacts SET status = 'complained', updated_at = NOW() WHERE email = $1",
-        [email]
-      );
+
+      if (updateResult.rows.length > 0) {
+        await pool.query(
+          "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type) VALUES ($1, $2, 'complained')",
+          [recipientId, campaignId]
+        );
+        await pool.query(
+          'UPDATE campaigns SET complaint_count = complaint_count + 1, updated_at = NOW() WHERE id = $1',
+          [campaignId]
+        );
+        await pool.query(
+          "UPDATE contacts SET status = 'complained', updated_at = NOW() WHERE email = $1",
+          [email]
+        );
+      } else {
+        logger.info('Duplicate complaint event ignored', { recipientId, messageId });
+      }
       break;
     }
 
     case 'Delivery': {
-      await pool.query(
-        "UPDATE campaign_recipients SET status = 'delivered', delivered_at = NOW() WHERE id = $1",
+      // FIX: Use idempotent updates - only process if not already delivered
+      const updateResult = await pool.query(
+        "UPDATE campaign_recipients SET status = 'delivered', delivered_at = NOW() WHERE id = $1 AND status NOT IN ('delivered', 'opened', 'clicked') RETURNING id",
         [recipientId]
       );
-      await pool.query(
-        "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type) VALUES ($1, $2, 'delivered')",
-        [recipientId, campaignId]
-      );
+
+      if (updateResult.rows.length > 0) {
+        await pool.query(
+          "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type) VALUES ($1, $2, 'delivered')",
+          [recipientId, campaignId]
+        );
+      } else {
+        logger.info('Duplicate delivery event ignored', { recipientId, messageId });
+      }
       break;
     }
 

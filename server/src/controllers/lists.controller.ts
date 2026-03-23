@@ -103,10 +103,21 @@ export async function addContactsToList(req: Request, res: Response, next: NextF
       throw new AppError('contactIds required', 400);
     }
 
-    const values = contactIds.map((_: string, i: number) => `($${i + 1}, $${contactIds.length + 1})`).join(', ');
+    // FIX: Properly build parameterized VALUES for multiple contactIds
+    // Each row needs its own pair of params: (contact_id, list_id)
+    const valuesPlaceholders: string[] = [];
+    const queryParams: unknown[] = [];
+    let paramIdx = 1;
+
+    for (const contactId of contactIds) {
+      valuesPlaceholders.push(`($${paramIdx}, $${paramIdx + 1})`);
+      queryParams.push(contactId, id);
+      paramIdx += 2;
+    }
+
     await pool.query(
-      `INSERT INTO contact_list_members (contact_id, list_id) VALUES ${values} ON CONFLICT DO NOTHING`,
-      [...contactIds, id]
+      `INSERT INTO contact_list_members (contact_id, list_id) VALUES ${valuesPlaceholders.join(', ')} ON CONFLICT DO NOTHING`,
+      queryParams
     );
 
     await pool.query(

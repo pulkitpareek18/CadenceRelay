@@ -3,13 +3,35 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import toast from 'react-hot-toast';
 import { getDashboardData, exportAnalytics } from '../api/analytics.api';
 
+/** Safely convert postgres string values to numbers */
+function toNum(val: string | number | undefined | null): number {
+  return Number(val) || 0;
+}
+
+function fmtNum(val: string | number | undefined | null): string {
+  return toNum(val).toLocaleString();
+}
+
+function fmtRate(val: string | number | undefined | null): string {
+  return toNum(val).toFixed(1);
+}
+
 export default function Analytics() {
   const [data, setData] = useState<{ stats: Record<string, string>; volume: Array<Record<string, string>> } | null>(null);
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [dateError, setDateError] = useState('');
 
   useEffect(() => {
+    // Date range validation
+    if (from && to && new Date(from) > new Date(to)) {
+      setDateError('Start date must be before end date');
+      return;
+    }
+    setDateError('');
+
+    setLoading(true);
     const params: Record<string, string> = {};
     if (from) params.from = from;
     if (to) params.to = to;
@@ -22,6 +44,15 @@ export default function Analytics() {
   if (loading) return <div className="flex h-64 items-center justify-center text-gray-500">Loading...</div>;
   if (!data) return <div className="p-6">Failed to load</div>;
 
+  // Convert volume string data to numbers for charts
+  const volumeData = data.volume.map((v) => ({
+    date: v.date,
+    sent: toNum(v.sent),
+    opened: toNum(v.opened),
+    clicked: toNum(v.clicked),
+    bounced: toNum(v.bounced),
+  }));
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between">
@@ -33,14 +64,15 @@ export default function Analytics() {
           <button onClick={() => exportAnalytics({ from, to })} className="rounded-lg border px-4 py-1.5 text-sm hover:bg-gray-50">Export CSV</button>
         </div>
       </div>
+      {dateError && <p className="mt-2 text-sm text-red-500">{dateError}</p>}
 
       {/* Summary */}
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
-          { label: 'Emails Sent', value: data.stats.total_sent, color: 'text-blue-600' },
-          { label: 'Open Rate', value: `${data.stats.open_rate}%`, color: 'text-green-600' },
-          { label: 'Click Rate', value: `${data.stats.click_rate}%`, color: 'text-purple-600' },
-          { label: 'Bounce Rate', value: `${data.stats.bounce_rate}%`, color: 'text-red-600' },
+          { label: 'Emails Sent', value: fmtNum(data.stats.total_sent), color: 'text-blue-600' },
+          { label: 'Open Rate', value: `${fmtRate(data.stats.open_rate)}%`, color: 'text-green-600' },
+          { label: 'Click Rate', value: `${fmtRate(data.stats.click_rate)}%`, color: 'text-purple-600' },
+          { label: 'Bounce Rate', value: `${fmtRate(data.stats.bounce_rate)}%`, color: 'text-red-600' },
         ].map((s) => (
           <div key={s.label} className="rounded-xl bg-white p-5 shadow-sm">
             <span className="text-sm text-gray-500">{s.label}</span>
@@ -54,9 +86,9 @@ export default function Analytics() {
         <div className="rounded-xl bg-white p-5 shadow-sm">
           <h3 className="font-semibold">Send Volume</h3>
           <div className="mt-4 h-72">
-            {data.volume.length > 0 ? (
+            {volumeData.length > 0 ? (
               <ResponsiveContainer>
-                <BarChart data={data.volume}>
+                <BarChart data={volumeData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
@@ -74,9 +106,9 @@ export default function Analytics() {
         <div className="rounded-xl bg-white p-5 shadow-sm">
           <h3 className="font-semibold">Engagement</h3>
           <div className="mt-4 h-72">
-            {data.volume.length > 0 ? (
+            {volumeData.length > 0 ? (
               <ResponsiveContainer>
-                <LineChart data={data.volume}>
+                <LineChart data={volumeData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
@@ -96,15 +128,15 @@ export default function Analytics() {
       <div className="mt-6 grid grid-cols-3 gap-4">
         <div className="rounded-xl bg-white p-5 shadow-sm text-center">
           <span className="text-sm text-gray-500">Failed Deliveries</span>
-          <p className="text-2xl font-bold text-red-600">{data.stats.total_failed}</p>
+          <p className="text-2xl font-bold text-red-600">{fmtNum(data.stats.total_failed)}</p>
         </div>
         <div className="rounded-xl bg-white p-5 shadow-sm text-center">
           <span className="text-sm text-gray-500">Complaints</span>
-          <p className="text-2xl font-bold text-orange-600">{data.stats.total_complaints}</p>
+          <p className="text-2xl font-bold text-orange-600">{fmtNum(data.stats.total_complaints)}</p>
         </div>
         <div className="rounded-xl bg-white p-5 shadow-sm text-center">
           <span className="text-sm text-gray-500">Unsubscribes</span>
-          <p className="text-2xl font-bold text-gray-600">{data.stats.total_unsubscribes}</p>
+          <p className="text-2xl font-bold text-gray-600">{fmtNum(data.stats.total_unsubscribes)}</p>
         </div>
       </div>
     </div>
