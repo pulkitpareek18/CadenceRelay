@@ -158,8 +158,21 @@ export async function deleteCampaign(req: Request, res: Response, next: NextFunc
       }
     }
 
-    // campaign_recipients and email_events cascade via ON DELETE CASCADE
-    await pool.query('DELETE FROM campaigns WHERE id = $1', [id]);
+    // Manually delete child records (email_events & unsubscribes lack ON DELETE CASCADE)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM unsubscribes WHERE campaign_id = $1', [id]);
+      await client.query('DELETE FROM email_events WHERE campaign_id = $1', [id]);
+      await client.query('DELETE FROM campaign_recipients WHERE campaign_id = $1', [id]);
+      await client.query('DELETE FROM campaigns WHERE id = $1', [id]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
     res.json({ message: 'Campaign deleted' });
   } catch (err) {
     next(err);
@@ -189,9 +202,22 @@ export async function bulkDeleteCampaigns(req: Request, res: Response, next: Nex
       }
     }
 
-    // campaign_recipients and email_events cascade via ON DELETE CASCADE
-    const result = await pool.query('DELETE FROM campaigns WHERE id = ANY($1)', [ids]);
-    res.json({ message: `${result.rowCount} campaign(s) deleted` });
+    // Manually delete child records (email_events & unsubscribes lack ON DELETE CASCADE)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM unsubscribes WHERE campaign_id = ANY($1)', [ids]);
+      await client.query('DELETE FROM email_events WHERE campaign_id = ANY($1)', [ids]);
+      await client.query('DELETE FROM campaign_recipients WHERE campaign_id = ANY($1)', [ids]);
+      const result = await client.query('DELETE FROM campaigns WHERE id = ANY($1)', [ids]);
+      await client.query('COMMIT');
+      res.json({ message: `${result.rowCount} campaign(s) deleted` });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     next(err);
   }

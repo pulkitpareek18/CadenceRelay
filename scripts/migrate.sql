@@ -129,8 +129,8 @@ CREATE INDEX IF NOT EXISTS cr_provider_msg_idx ON campaign_recipients(provider_m
 -- email_events
 CREATE TABLE IF NOT EXISTS email_events (
     id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    campaign_recipient_id uuid REFERENCES campaign_recipients(id),
-    campaign_id uuid REFERENCES campaigns(id),
+    campaign_recipient_id uuid REFERENCES campaign_recipients(id) ON DELETE CASCADE,
+    campaign_id uuid REFERENCES campaigns(id) ON DELETE CASCADE,
     event_type varchar(20) NOT NULL CHECK (event_type IN ('queued','sent','delivered','bounced','opened','clicked','complained','unsubscribed','failed')),
     metadata jsonb DEFAULT '{}'::jsonb,
     ip_address inet,
@@ -160,7 +160,7 @@ ON CONFLICT (key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS unsubscribes (
     id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
     email varchar(320) NOT NULL,
-    campaign_id uuid REFERENCES campaigns(id),
+    campaign_id uuid REFERENCES campaigns(id) ON DELETE CASCADE,
     reason text,
     created_at timestamptz DEFAULT NOW()
 );
