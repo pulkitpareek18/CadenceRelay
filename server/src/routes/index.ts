@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import authRoutes from './auth.routes';
 import settingsRoutes from './settings.routes';
+import contactsRoutes from './contacts.routes';
+import listsRoutes from './lists.routes';
 
 const router = Router();
 
@@ -19,10 +21,10 @@ router.use('/auth', authRoutes);
 
 // Protected routes
 router.use('/settings', authenticate, settingsRoutes);
+router.use('/contacts', authenticate, contactsRoutes);
+router.use('/lists', authenticate, listsRoutes);
 
 // TODO: Mount remaining route modules in upcoming sprints
-// router.use('/contacts', authenticate, contactRoutes);
-// router.use('/lists', authenticate, listRoutes);
 // router.use('/campaigns', authenticate, campaignRoutes);
 // router.use('/templates', authenticate, templateRoutes);
 // router.use('/analytics', authenticate, analyticsRoutes);
