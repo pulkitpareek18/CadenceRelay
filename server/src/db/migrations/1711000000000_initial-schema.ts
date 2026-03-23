@@ -25,7 +25,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('uuid_generate_v4()') },
     email: { type: 'varchar(320)', notNull: true },
     name: { type: 'varchar(255)' },
-    metadata: { type: 'jsonb', default: "'{}'" },
+    metadata: { type: 'jsonb', default: pgm.func("'{}'::jsonb") },
     status: {
       type: 'varchar(20)',
       default: "'active'",
@@ -87,7 +87,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     subject: { type: 'varchar(998)', notNull: true },
     html_body: { type: 'text', notNull: true },
     text_body: { type: 'text' },
-    variables: { type: 'jsonb', default: "'[]'" },
+    variables: { type: 'jsonb', default: pgm.func("'[]'::jsonb") },
     version: { type: 'integer', default: 1 },
     is_active: { type: 'boolean', default: true },
     created_at: { type: 'timestamptz', default: pgm.func('NOW()') },
@@ -104,7 +104,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     subject: { type: 'varchar(998)', notNull: true },
     html_body: { type: 'text', notNull: true },
     text_body: { type: 'text' },
-    variables: { type: 'jsonb', default: "'[]'" },
+    variables: { type: 'jsonb', default: pgm.func("'[]'::jsonb") },
     created_at: { type: 'timestamptz', default: pgm.func('NOW()') },
   });
   pgm.createIndex('template_versions', 'template_id');
@@ -172,7 +172,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
     bounced_at: { type: 'timestamptz' },
     error_message: { type: 'text' },
     tracking_token: { type: 'varchar(64)', unique: true },
-    link_urls: { type: 'jsonb', default: "'[]'" },
+    link_urls: { type: 'jsonb', default: pgm.func("'[]'::jsonb") },
     created_at: { type: 'timestamptz', default: pgm.func('NOW()') },
   });
   pgm.createIndex('campaign_recipients', 'campaign_id');
@@ -193,7 +193,7 @@ export async function up(pgm: MigrationBuilder): Promise<void> {
       notNull: true,
       check: "event_type IN ('queued','sent','delivered','bounced','opened','clicked','complained','unsubscribed','failed')",
     },
-    metadata: { type: 'jsonb', default: "'{}'" },
+    metadata: { type: 'jsonb', default: pgm.func("'{}'::jsonb") },
     ip_address: { type: 'inet' },
     user_agent: { type: 'text' },
     created_at: { type: 'timestamptz', default: pgm.func('NOW()') },
