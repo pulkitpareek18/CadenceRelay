@@ -1,0 +1,41 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            cd /opt/bulk-email-sender
+
+            # Pull latest code
+            git pull origin main
+
+            # Rebuild and restart containers (--no-deps prevents unnecessary rebuilds)
+            docker compose -f docker-compose.prod.yml build --no-cache server worker client
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Run migrations (safe - only applies new ones, never drops)
+            sleep 10
+            docker compose -f docker-compose.prod.yml exec -T server node -e "
+              const { Pool } = require('pg');
+              const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+              pool.query('SELECT 1').then(() => { console.log('DB ready'); pool.end(); }).catch(e => { console.error(e); process.exit(1); });
+            "
+            docker compose -f docker-compose.prod.yml exec -T server npx node-pg-migrate up \
+              --migrations-dir dist/db/migrations \
+              --migration-file-language js
+
+            # Cleanup old images
+            docker image prune -f
+
+            echo "Deployment complete!"
