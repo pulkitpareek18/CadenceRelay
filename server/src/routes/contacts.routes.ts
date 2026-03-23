@@ -8,13 +8,17 @@ import {
   deleteContact,
   bulkDeleteContacts,
   importContacts,
+  importContactsCSV,
+  previewCSV,
   exportContacts,
+  getContactFilters,
 } from '../controllers/contacts.controller';
 import { validateBody } from '../middleware/validateRequest';
 import { z } from 'zod';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Increase file size limit to 100MB for large school CSVs (280k+ rows)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
 const createSchema = z.object({
   email: z.string().email(),
@@ -32,11 +36,14 @@ const updateSchema = z.object({
 
 router.get('/', listContacts);
 router.get('/export', exportContacts);
+router.get('/filters', getContactFilters);
 router.get('/:id', getContact);
 router.post('/', validateBody(createSchema), createContact);
 router.put('/:id', validateBody(updateSchema), updateContact);
 router.delete('/bulk', bulkDeleteContacts);
 router.delete('/:id', deleteContact);
 router.post('/import', upload.single('file'), importContacts);
+router.post('/import-csv', upload.single('file'), importContactsCSV);
+router.post('/preview-csv', upload.single('file'), previewCSV);
 
 export default router;

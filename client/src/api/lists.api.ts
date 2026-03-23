@@ -1,10 +1,22 @@
 import apiClient from './client';
 
+export interface SmartFilterCriteria {
+  state?: string[];
+  district?: string[];
+  block?: string[];
+  category?: string[];
+  management?: string[];
+  classes_min?: number;
+  classes_max?: number;
+}
+
 export interface ContactList {
   id: string;
   name: string;
   description: string | null;
   contact_count: number;
+  is_smart: boolean;
+  filter_criteria: SmartFilterCriteria | null;
   created_at: string;
 }
 
@@ -23,7 +35,16 @@ export async function createList(data: { name: string; description?: string }) {
   return res.data;
 }
 
-export async function updateList(id: string, data: { name?: string; description?: string }) {
+export async function createSmartList(data: {
+  name: string;
+  description?: string;
+  filterCriteria: SmartFilterCriteria;
+}) {
+  const res = await apiClient.post('/lists/smart', data);
+  return res.data;
+}
+
+export async function updateList(id: string, data: { name?: string; description?: string; filterCriteria?: SmartFilterCriteria }) {
   const res = await apiClient.put(`/lists/${id}`, data);
   return res.data;
 }

@@ -38,10 +38,11 @@ export default function ContactDetail() {
     <div className="p-6">
       <button onClick={() => navigate('/contacts')} className="mb-4 text-sm text-primary-600 hover:text-primary-800">&larr; Back to Contacts</button>
 
+      {/* Basic Info */}
       <div className="rounded-xl bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold">{contact.email}</h1>
-        <p className="text-gray-500">{contact.name || 'No name'}</p>
-        <div className="mt-4 grid grid-cols-4 gap-4">
+        <h1 className="text-2xl font-bold">{contact.name || contact.email}</h1>
+        <p className="text-gray-500">{contact.email}</p>
+        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <span className="text-sm text-gray-500">Status</span>
             <p className={`font-medium ${contact.status === 'active' ? 'text-green-600' : 'text-red-600'}`}>{contact.status}</p>
@@ -61,6 +62,76 @@ export default function ContactDetail() {
         </div>
       </div>
 
+      {/* School Information */}
+      {(contact.state || contact.district || contact.block || contact.classes || contact.category || contact.management || contact.address) && (
+        <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">School Information</h2>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {contact.state && (
+              <div>
+                <span className="text-sm text-gray-500">State</span>
+                <p className="font-medium">{contact.state}</p>
+              </div>
+            )}
+            {contact.district && (
+              <div>
+                <span className="text-sm text-gray-500">District</span>
+                <p className="font-medium">{contact.district}</p>
+              </div>
+            )}
+            {contact.block && (
+              <div>
+                <span className="text-sm text-gray-500">Block</span>
+                <p className="font-medium">{contact.block}</p>
+              </div>
+            )}
+            {contact.classes && (
+              <div>
+                <span className="text-sm text-gray-500">Classes</span>
+                <p className="font-medium">{contact.classes}</p>
+              </div>
+            )}
+            {contact.category && (
+              <div>
+                <span className="text-sm text-gray-500">Category</span>
+                <p className="font-medium">{contact.category}</p>
+              </div>
+            )}
+            {contact.management && (
+              <div>
+                <span className="text-sm text-gray-500">Management</span>
+                <p className="font-medium">{contact.management}</p>
+              </div>
+            )}
+            {contact.address && (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <span className="text-sm text-gray-500">Address</span>
+                <p className="font-medium">{contact.address}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Lists */}
+      {contact.lists && contact.lists.length > 0 && (
+        <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">Lists</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {contact.lists.map((l) => (
+              <span
+                key={l.id}
+                onClick={() => navigate(`/lists/${l.id}`)}
+                className="cursor-pointer rounded-full bg-primary-100 px-3 py-1 text-sm font-medium text-primary-700 hover:bg-primary-200"
+              >
+                {l.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Send History */}
       <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold">Send History</h2>
         {history.length === 0 ? (

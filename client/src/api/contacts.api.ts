@@ -10,7 +10,38 @@ export interface Contact {
   send_count: number;
   last_sent_at: string | null;
   created_at: string;
+  state: string | null;
+  district: string | null;
+  block: string | null;
+  classes: string | null;
+  category: string | null;
+  management: string | null;
+  address: string | null;
   lists?: { id: string; name: string }[];
+}
+
+export interface ContactFilters {
+  states: string[];
+  districts: string[];
+  blocks: string[];
+  categories: string[];
+  managements: string[];
+}
+
+export interface CSVPreviewResult {
+  headers: string[];
+  autoMapping: Record<string, string>;
+  previewRows: string[][];
+  totalRows: number;
+}
+
+export interface CSVImportResult {
+  imported: number;
+  duplicates: number;
+  skipped: number;
+  total: number;
+  errors: string[];
+  detectedColumns: string[];
 }
 
 export async function listContacts(params: Record<string, string> = {}) {
@@ -53,6 +84,36 @@ export async function importContacts(file: File, listId?: string) {
   return res.data;
 }
 
+export async function previewCSV(file: File): Promise<CSVPreviewResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await apiClient.post('/contacts/preview-csv', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+}
+
+export async function importContactsCSV(
+  file: File,
+  listId?: string,
+  columnMapping?: Record<string, string>,
+  onProgress?: (progress: number) => void
+): Promise<CSVImportResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (listId) formData.append('listId', listId);
+  if (columnMapping) formData.append('columnMapping', JSON.stringify(columnMapping));
+  const res = await apiClient.post('/contacts/import-csv', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress && progressEvent.total) {
+        onProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
+      }
+    },
+  });
+  return res.data;
+}
+
 export async function exportContacts(listId?: string) {
   const params = listId ? { listId } : {};
   const res = await apiClient.get('/contacts/export', { params, responseType: 'blob' });
@@ -63,4 +124,9 @@ export async function exportContacts(listId?: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+export async function getContactFilters(params: Record<string, string> = {}): Promise<ContactFilters> {
+  const res = await apiClient.get('/contacts/filters', { params });
+  return res.data;
 }

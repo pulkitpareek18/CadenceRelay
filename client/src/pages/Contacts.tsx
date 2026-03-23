@@ -1,8 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { listContacts, importContacts, exportContacts, createContact, deleteContact, bulkDeleteContacts, Contact } from '../api/contacts.api';
-import { listLists, ContactList } from '../api/lists.api';
+import {
+  listContacts,
+  exportContacts,
+  createContact,
+  deleteContact,
+  bulkDeleteContacts,
+  getContactFilters,
+  Contact,
+  ContactFilters,
+} from '../api/contacts.api';
+import { listLists, createSmartList, ContactList } from '../api/lists.api';
 import AdminPasswordModal from '../components/ui/AdminPasswordModal';
 
 function isValidEmail(email: string): boolean {
@@ -18,7 +27,15 @@ export default function Contacts() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [listFilter, setListFilter] = useState('');
-  const [showImportModal, setShowImportModal] = useState(false);
+
+  // School filters
+  const [stateFilter, setStateFilter] = useState('');
+  const [districtFilter, setDistrictFilter] = useState('');
+  const [blockFilter, setBlockFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [managementFilter, setManagementFilter] = useState('');
+  const [filters, setFilters] = useState<ContactFilters | null>(null);
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
@@ -26,7 +43,23 @@ export default function Contacts() {
   const [emailError, setEmailError] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteModal, setDeleteModal] = useState<{ type: 'single' | 'bulk'; id?: string } | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
   const navigate = useNavigate();
+
+  // Fetch filter options
+  const fetchFilters = useCallback(async () => {
+    try {
+      const params: Record<string, string> = {};
+      if (stateFilter) params.state = stateFilter;
+      if (districtFilter) params.district = districtFilter;
+      const f = await getContactFilters(params);
+      setFilters(f);
+    } catch {
+      // silently fail
+    }
+  }, [stateFilter, districtFilter]);
+
+  useEffect(() => { fetchFilters(); }, [fetchFilters]);
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -35,6 +68,11 @@ export default function Contacts() {
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       if (listFilter) params.listId = listFilter;
+      if (stateFilter) params.state = stateFilter;
+      if (districtFilter) params.district = districtFilter;
+      if (blockFilter) params.block = blockFilter;
+      if (categoryFilter) params.category = categoryFilter;
+      if (managementFilter) params.management = managementFilter;
       const res = await listContacts(params);
       setContacts(res.data);
       setTotal(res.pagination.total);
@@ -43,13 +81,17 @@ export default function Contacts() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, listFilter]);
+  }, [page, search, statusFilter, listFilter, stateFilter, districtFilter, blockFilter, categoryFilter, managementFilter]);
 
   useEffect(() => { fetchContacts(); }, [fetchContacts]);
   useEffect(() => { listLists().then(setLists).catch(() => {}); }, []);
 
   // Clear selection when page/filters change
-  useEffect(() => { setSelectedIds(new Set()); }, [page, search, statusFilter, listFilter]);
+  useEffect(() => { setSelectedIds(new Set()); }, [page, search, statusFilter, listFilter, stateFilter, districtFilter, blockFilter, categoryFilter, managementFilter]);
+
+  // Reset cascading filters
+  useEffect(() => { setDistrictFilter(''); setBlockFilter(''); }, [stateFilter]);
+  useEffect(() => { setBlockFilter(''); }, [districtFilter]);
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -109,6 +151,41 @@ export default function Contacts() {
     fetchContacts();
   }
 
+  const activeFilterCount = [stateFilter, districtFilter, blockFilter, categoryFilter, managementFilter].filter(Boolean).length;
+
+  function clearAllFilters() {
+    setStateFilter('');
+    setDistrictFilter('');
+    setBlockFilter('');
+    setCategoryFilter('');
+    setManagementFilter('');
+    setPage(1);
+  }
+
+  async function handleCreateSmartList() {
+    const filterCriteria: Record<string, unknown> = {};
+    if (stateFilter) filterCriteria.state = stateFilter.split(',');
+    if (districtFilter) filterCriteria.district = districtFilter.split(',');
+    if (blockFilter) filterCriteria.block = blockFilter.split(',');
+    if (categoryFilter) filterCriteria.category = categoryFilter.split(',');
+    if (managementFilter) filterCriteria.management = managementFilter.split(',');
+
+    const name = prompt('Enter a name for this smart list:');
+    if (!name) return;
+
+    try {
+      await createSmartList({
+        name,
+        description: `Auto-generated smart list with ${activeFilterCount} filter(s)`,
+        filterCriteria,
+      });
+      toast.success('Smart list created');
+      listLists().then(setLists).catch(() => {});
+    } catch {
+      toast.error('Failed to create smart list');
+    }
+  }
+
   const totalPages = Math.ceil(total / 50);
 
   return (
@@ -125,12 +202,12 @@ export default function Contacts() {
             </button>
           )}
           <button onClick={() => exportContacts(listFilter || undefined)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Export CSV</button>
-          <button onClick={() => setShowImportModal(true)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Import CSV</button>
+          <button onClick={() => navigate('/import')} className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Import CSV</button>
           <button onClick={() => setShowAddModal(true)} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700">Add Contact</button>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Search + Status + List filters */}
       <div className="mt-4 flex gap-3">
         <input
           type="text"
@@ -156,12 +233,149 @@ export default function Contacts() {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
         >
           <option value="">All Lists</option>
-          {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          {lists.map((l) => <option key={l.id} value={l.id}>{l.name}{l.is_smart ? ' (Smart)' : ''}</option>)}
         </select>
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`flex items-center gap-1 rounded-lg border px-3 py-2 text-sm ${
+            activeFilterCount > 0
+              ? 'border-primary-300 bg-primary-50 text-primary-700'
+              : 'border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+          </svg>
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 text-xs text-white">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* School Filter Bar */}
+      {showFilters && filters && (
+        <div className="mt-3 rounded-xl bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">School Filters</h3>
+            <div className="flex gap-2">
+              {activeFilterCount > 0 && (
+                <button onClick={handleCreateSmartList} className="text-xs text-primary-600 hover:text-primary-800">
+                  Create Smart List from Filters
+                </button>
+              )}
+              {activeFilterCount > 0 && (
+                <button onClick={clearAllFilters} className="text-xs text-gray-500 hover:text-gray-700">
+                  Clear all
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">State</label>
+              <select
+                value={stateFilter}
+                onChange={(e) => { setStateFilter(e.target.value); setPage(1); }}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All States</option>
+                {filters.states.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">District</label>
+              <select
+                value={districtFilter}
+                onChange={(e) => { setDistrictFilter(e.target.value); setPage(1); }}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All Districts</option>
+                {filters.districts.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">Block</label>
+              <select
+                value={blockFilter}
+                onChange={(e) => { setBlockFilter(e.target.value); setPage(1); }}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All Blocks</option>
+                {filters.blocks.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">Category</label>
+              <select
+                value={categoryFilter}
+                onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All Categories</option>
+                {filters.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">Management</label>
+              <select
+                value={managementFilter}
+                onChange={(e) => { setManagementFilter(e.target.value); setPage(1); }}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All Management</option>
+                {filters.managements.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Active filter chips */}
+          {activeFilterCount > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {stateFilter && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-medium text-primary-700">
+                  State: {stateFilter}
+                  <button onClick={() => setStateFilter('')} className="ml-0.5 hover:text-primary-900">&times;</button>
+                </span>
+              )}
+              {districtFilter && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-medium text-primary-700">
+                  District: {districtFilter}
+                  <button onClick={() => setDistrictFilter('')} className="ml-0.5 hover:text-primary-900">&times;</button>
+                </span>
+              )}
+              {blockFilter && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-medium text-primary-700">
+                  Block: {blockFilter}
+                  <button onClick={() => setBlockFilter('')} className="ml-0.5 hover:text-primary-900">&times;</button>
+                </span>
+              )}
+              {categoryFilter && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-medium text-primary-700">
+                  Category: {categoryFilter}
+                  <button onClick={() => setCategoryFilter('')} className="ml-0.5 hover:text-primary-900">&times;</button>
+                </span>
+              )}
+              {managementFilter && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-medium text-primary-700">
+                  Management: {managementFilter}
+                  <button onClick={() => setManagementFilter('')} className="ml-0.5 hover:text-primary-900">&times;</button>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Contact count summary */}
+      <div className="mt-3 text-sm text-gray-500">
+        {total.toLocaleString()} contact{total !== 1 ? 's' : ''} found
       </div>
 
       {/* Table */}
-      <div className="mt-4 overflow-hidden rounded-xl bg-white shadow-sm">
+      <div className="mt-2 overflow-hidden rounded-xl bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
@@ -174,24 +388,26 @@ export default function Contacts() {
                     className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">State</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">District</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Category</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Sent</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Bounced</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
               ) : contacts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center">
+                  <td colSpan={9} className="px-4 py-12 text-center">
                     <div className="text-gray-400">
                       <p className="text-lg font-medium">No contacts found</p>
                       <p className="mt-1 text-sm">
-                        {search || statusFilter || listFilter
+                        {search || statusFilter || listFilter || activeFilterCount > 0
                           ? 'Try adjusting your search filters'
                           : 'Get started by adding your first contact or importing a CSV file'}
                       </p>
@@ -208,8 +424,11 @@ export default function Contacts() {
                       className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                     />
                   </td>
+                  <td className="px-4 py-3 max-w-[200px] truncate" onClick={() => navigate(`/contacts/${c.id}`)} title={c.name || ''}>{c.name || '-'}</td>
                   <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.email}</td>
-                  <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.name || '-'}</td>
+                  <td className="px-4 py-3 text-xs" onClick={() => navigate(`/contacts/${c.id}`)}>{c.state || '-'}</td>
+                  <td className="px-4 py-3 text-xs" onClick={() => navigate(`/contacts/${c.id}`)}>{c.district || '-'}</td>
+                  <td className="px-4 py-3 text-xs max-w-[150px] truncate" onClick={() => navigate(`/contacts/${c.id}`)} title={c.category || ''}>{c.category || '-'}</td>
                   <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>
                     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
                       c.status === 'active' ? 'bg-green-100 text-green-700' :
@@ -219,7 +438,6 @@ export default function Contacts() {
                     }`}>{c.status}</span>
                   </td>
                   <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.send_count}</td>
-                  <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.bounce_count}</td>
                   <td className="px-4 py-3">
                     <button
                       onClick={(e) => { e.stopPropagation(); setDeleteModal({ type: 'single', id: c.id }); }}
@@ -238,7 +456,7 @@ export default function Contacts() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-          <span>{total} contacts total</span>
+          <span>{total.toLocaleString()} contacts total</span>
           <div className="flex gap-2">
             <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Prev</button>
             <span className="px-3 py-1">Page {page} of {totalPages}</span>
@@ -262,9 +480,6 @@ export default function Contacts() {
         />
       )}
 
-      {/* Import Modal */}
-      {showImportModal && <ImportModal lists={lists} onClose={() => setShowImportModal(false)} onDone={fetchContacts} />}
-
       {/* Add Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -284,7 +499,7 @@ export default function Contacts() {
               <input type="text" placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
               <select value={newListId} onChange={(e) => setNewListId(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
                 <option value="">No list</option>
-                {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {lists.filter(l => !l.is_smart).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
             <div className="mt-4 flex justify-end gap-2">
@@ -294,71 +509,6 @@ export default function Contacts() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ImportModal({ lists, onClose, onDone }: { lists: ContactList[]; onClose: () => void; onDone: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [listId, setListId] = useState('');
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
-
-  async function handleImport() {
-    if (!file) return;
-    setImporting(true);
-    try {
-      const res = await importContacts(file, listId || undefined);
-      setResult(res);
-      toast.success(`Imported ${res.imported} contacts`);
-      onDone();
-    } catch {
-      toast.error('Import failed');
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg rounded-xl bg-white p-6">
-        <h3 className="text-lg font-semibold">Import Contacts from CSV</h3>
-        <p className="mt-1 text-sm text-gray-500">CSV must have an "email" column. Optional: "name" column.</p>
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-8">
-            <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-          </div>
-          <select value={listId} onChange={(e) => setListId(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
-            <option value="">No list (import only)</option>
-            {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </div>
-        {result && (
-          <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-              <span className="font-medium text-green-700">Import complete</span>
-            </div>
-            <p className="mt-1">Imported: <span className="font-medium">{result.imported}</span> | Skipped: <span className="font-medium">{result.skipped}</span></p>
-            {result.errors.length > 0 && (
-              <details className="mt-1">
-                <summary className="text-red-600 cursor-pointer">Errors ({result.errors.length})</summary>
-                <ul className="mt-1 text-xs text-red-500">{result.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
-              </details>
-            )}
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">
-            {result ? 'Close' : 'Cancel'}
-          </button>
-          {!result && (
-            <button onClick={handleImport} disabled={!file || importing} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white disabled:opacity-50">
-              {importing ? 'Importing...' : 'Import'}
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

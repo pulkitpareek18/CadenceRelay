@@ -15,7 +15,7 @@ function validateUUID(id: string, label = 'ID'): void {
 export async function listContacts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { page, limit, offset } = parsePagination(req.query as { page?: string; limit?: string });
-    const { search, status, listId, minSendCount, maxSendCount } = req.query;
+    const { search, status, listId, minSendCount, maxSendCount, state, district, block, category, management } = req.query;
 
     let whereClause = 'WHERE 1=1';
     const params: unknown[] = [];
@@ -44,6 +44,36 @@ export async function listContacts(req: Request, res: Response, next: NextFuncti
     if (maxSendCount) {
       whereClause += ` AND c.send_count <= $${paramIndex}`;
       params.push(parseInt(maxSendCount as string));
+      paramIndex++;
+    }
+    if (state) {
+      const states = (state as string).split(',').map(s => s.trim()).filter(Boolean);
+      whereClause += ` AND c.state = ANY($${paramIndex})`;
+      params.push(states);
+      paramIndex++;
+    }
+    if (district) {
+      const districts = (district as string).split(',').map(s => s.trim()).filter(Boolean);
+      whereClause += ` AND c.district = ANY($${paramIndex})`;
+      params.push(districts);
+      paramIndex++;
+    }
+    if (block) {
+      const blocks = (block as string).split(',').map(s => s.trim()).filter(Boolean);
+      whereClause += ` AND c.block = ANY($${paramIndex})`;
+      params.push(blocks);
+      paramIndex++;
+    }
+    if (category) {
+      const categories = (category as string).split(',').map(s => s.trim()).filter(Boolean);
+      whereClause += ` AND c.category = ANY($${paramIndex})`;
+      params.push(categories);
+      paramIndex++;
+    }
+    if (management) {
+      const managements = (management as string).split(',').map(s => s.trim()).filter(Boolean);
+      whereClause += ` AND c.management = ANY($${paramIndex})`;
+      params.push(managements);
       paramIndex++;
     }
 
@@ -306,6 +336,248 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Column name mapping: CSV header -> DB column
+const COLUMN_MAP: Record<string, string> = {
+  email: 'email',
+  name: 'name',
+  school_name: 'name',
+  state: 'state',
+  district: 'district',
+  block: 'block',
+  classes: 'classes',
+  category: 'category',
+  management: 'management',
+  address: 'address',
+};
+
+export async function importContactsCSV(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const file = req.file;
+    if (!file) {
+      throw new AppError('CSV file required', 400);
+    }
+
+    const { listId } = req.body;
+    // Parse optional column mapping overrides from the body (JSON string)
+    let columnMapping: Record<string, string> | undefined;
+    if (req.body.columnMapping) {
+      try {
+        columnMapping = JSON.parse(req.body.columnMapping);
+      } catch {
+        throw new AppError('Invalid columnMapping JSON', 400);
+      }
+    }
+
+    const csvContent = file.buffer.toString('utf-8');
+    const lines = csvContent.split('\n').filter((line) => line.trim());
+
+    if (lines.length < 2) {
+      throw new AppError('CSV must have a header row and at least one data row', 400);
+    }
+
+    // Parse headers and build mapping
+    const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase().trim());
+    const mapping: Record<string, number> = {}; // db_column -> csv_index
+
+    for (let i = 0; i < headers.length; i++) {
+      const header = headers[i];
+      // If user provided custom mapping, use it; otherwise use auto-detect
+      if (columnMapping && columnMapping[header]) {
+        mapping[columnMapping[header]] = i;
+      } else if (COLUMN_MAP[header]) {
+        mapping[COLUMN_MAP[header]] = i;
+      }
+    }
+
+    if (mapping['email'] === undefined) {
+      throw new AppError('CSV must have an "email" column (or mapped equivalent)', 400);
+    }
+
+    let imported = 0;
+    let skipped = 0;
+    let duplicates = 0;
+    const errors: string[] = [];
+
+    const BATCH_SIZE = 500;
+    const dataRows = lines.slice(1);
+
+    // Process in batches
+    for (let batchStart = 0; batchStart < dataRows.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, dataRows.length);
+      const batch = dataRows.slice(batchStart, batchEnd);
+
+      const validRows: {
+        email: string;
+        name: string | null;
+        state: string | null;
+        district: string | null;
+        block: string | null;
+        classes: string | null;
+        category: string | null;
+        management: string | null;
+        address: string | null;
+      }[] = [];
+
+      for (let i = 0; i < batch.length; i++) {
+        const lineNum = batchStart + i + 2; // 1-indexed, skip header
+        const cols = parseCSVLine(batch[i]);
+
+        const email = cols[mapping['email']]?.trim();
+        if (!email || !isValidEmail(email)) {
+          skipped++;
+          if (errors.length < 50) {
+            errors.push(`Row ${lineNum}: Invalid email "${email || ''}"`);
+          }
+          continue;
+        }
+
+        validRows.push({
+          email,
+          name: mapping['name'] !== undefined ? cols[mapping['name']]?.trim() || null : null,
+          state: mapping['state'] !== undefined ? cols[mapping['state']]?.trim() || null : null,
+          district: mapping['district'] !== undefined ? cols[mapping['district']]?.trim() || null : null,
+          block: mapping['block'] !== undefined ? cols[mapping['block']]?.trim() || null : null,
+          classes: mapping['classes'] !== undefined ? cols[mapping['classes']]?.trim() || null : null,
+          category: mapping['category'] !== undefined ? cols[mapping['category']]?.trim() || null : null,
+          management: mapping['management'] !== undefined ? cols[mapping['management']]?.trim() || null : null,
+          address: mapping['address'] !== undefined ? cols[mapping['address']]?.trim() || null : null,
+        });
+      }
+
+      if (validRows.length === 0) continue;
+
+      // Batch insert with ON CONFLICT
+      const valuesPlaceholders: string[] = [];
+      const queryParams: unknown[] = [];
+      let paramIdx = 1;
+
+      for (const row of validRows) {
+        valuesPlaceholders.push(
+          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`
+        );
+        queryParams.push(
+          row.email,
+          row.name,
+          row.state,
+          row.district,
+          row.block,
+          row.classes,
+          row.category,
+          row.management,
+          row.address
+        );
+        paramIdx += 9;
+      }
+
+      const insertResult = await pool.query(
+        `INSERT INTO contacts (email, name, state, district, block, classes, category, management, address)
+         VALUES ${valuesPlaceholders.join(', ')}
+         ON CONFLICT (email) DO UPDATE SET
+           name = COALESCE(EXCLUDED.name, contacts.name),
+           state = COALESCE(EXCLUDED.state, contacts.state),
+           district = COALESCE(EXCLUDED.district, contacts.district),
+           block = COALESCE(EXCLUDED.block, contacts.block),
+           classes = COALESCE(EXCLUDED.classes, contacts.classes),
+           category = COALESCE(EXCLUDED.category, contacts.category),
+           management = COALESCE(EXCLUDED.management, contacts.management),
+           address = COALESCE(EXCLUDED.address, contacts.address),
+           updated_at = NOW()
+         RETURNING id, (xmax = 0) AS is_new`,
+        queryParams
+      );
+
+      const newIds: string[] = [];
+      for (const row of insertResult.rows) {
+        if (row.is_new) {
+          imported++;
+        } else {
+          duplicates++;
+        }
+        newIds.push(row.id);
+      }
+
+      // If listId provided, add all contacts to the list
+      if (listId && newIds.length > 0) {
+        const listValues: string[] = [];
+        const listParams: unknown[] = [];
+        let lIdx = 1;
+        for (const cId of newIds) {
+          listValues.push(`($${lIdx}, $${lIdx + 1})`);
+          listParams.push(cId, listId);
+          lIdx += 2;
+        }
+        await pool.query(
+          `INSERT INTO contact_list_members (contact_id, list_id) VALUES ${listValues.join(', ')} ON CONFLICT DO NOTHING`,
+          listParams
+        );
+      }
+    }
+
+    // Update list count
+    if (listId) {
+      await pool.query(
+        'UPDATE contact_lists SET contact_count = (SELECT COUNT(*) FROM contact_list_members WHERE list_id = $1), updated_at = NOW() WHERE id = $1',
+        [listId]
+      );
+    }
+
+    res.json({
+      imported,
+      duplicates,
+      skipped,
+      total: dataRows.length,
+      errors: errors.slice(0, 20),
+      detectedColumns: Object.keys(mapping),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Preview CSV: returns headers and first N rows for column mapping UI
+export async function previewCSV(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const file = req.file;
+    if (!file) {
+      throw new AppError('CSV file required', 400);
+    }
+
+    const csvContent = file.buffer.toString('utf-8');
+    const lines = csvContent.split('\n').filter((line) => line.trim());
+
+    if (lines.length < 1) {
+      throw new AppError('CSV file is empty', 400);
+    }
+
+    const headers = parseCSVLine(lines[0]).map((h) => h.trim());
+
+    // Auto-detect column mapping
+    const autoMapping: Record<string, string> = {};
+    for (const header of headers) {
+      const lower = header.toLowerCase();
+      if (COLUMN_MAP[lower]) {
+        autoMapping[header] = COLUMN_MAP[lower];
+      }
+    }
+
+    // Get first 10 data rows
+    const previewRows: string[][] = [];
+    for (let i = 1; i < Math.min(lines.length, 11); i++) {
+      previewRows.push(parseCSVLine(lines[i]));
+    }
+
+    res.json({
+      headers,
+      autoMapping,
+      previewRows,
+      totalRows: lines.length - 1,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Legacy import (keep for backwards compatibility)
 export async function importContacts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const file = req.file;
@@ -395,7 +667,7 @@ export async function exportContacts(req: Request, res: Response, next: NextFunc
   try {
     const { listId } = req.query;
 
-    let query = 'SELECT email, name, status, send_count, bounce_count, last_sent_at, created_at FROM contacts';
+    let query = 'SELECT email, name, state, district, block, classes, category, management, address, status, send_count, bounce_count, last_sent_at, created_at FROM contacts';
     const params: unknown[] = [];
 
     if (listId) {
@@ -407,13 +679,20 @@ export async function exportContacts(req: Request, res: Response, next: NextFunc
 
     const result = await pool.query(query, params);
 
-    const csvHeader = 'email,name,status,send_count,bounce_count,last_sent_at,created_at\n';
+    const csvHeader = 'email,name,state,district,block,classes,category,management,address,status,send_count,bounce_count,last_sent_at,created_at\n';
     // FIX: Properly escape all fields in CSV output
     const csvRows = result.rows
       .map((r) =>
         [
           escapeCSVField(r.email),
           escapeCSVField(r.name),
+          escapeCSVField(r.state),
+          escapeCSVField(r.district),
+          escapeCSVField(r.block),
+          escapeCSVField(r.classes),
+          escapeCSVField(r.category),
+          escapeCSVField(r.management),
+          escapeCSVField(r.address),
           escapeCSVField(r.status),
           r.send_count,
           r.bounce_count,
@@ -426,6 +705,67 @@ export async function exportContacts(req: Request, res: Response, next: NextFunc
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=contacts.csv');
     res.send(csvHeader + csvRows);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Filter facets endpoint: returns unique values for filter dropdowns
+export async function getContactFilters(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { state, district } = req.query;
+
+    const result: Record<string, string[]> = {};
+
+    // Always return states
+    const statesRes = await pool.query(
+      "SELECT DISTINCT state FROM contacts WHERE state IS NOT NULL AND state != '' ORDER BY state"
+    );
+    result.states = statesRes.rows.map((r) => r.state);
+
+    // Districts: optionally filtered by state
+    if (state) {
+      const states = (state as string).split(',').map(s => s.trim()).filter(Boolean);
+      const distRes = await pool.query(
+        "SELECT DISTINCT district FROM contacts WHERE district IS NOT NULL AND district != '' AND state = ANY($1) ORDER BY district",
+        [states]
+      );
+      result.districts = distRes.rows.map((r) => r.district);
+    } else {
+      const distRes = await pool.query(
+        "SELECT DISTINCT district FROM contacts WHERE district IS NOT NULL AND district != '' ORDER BY district"
+      );
+      result.districts = distRes.rows.map((r) => r.district);
+    }
+
+    // Blocks: optionally filtered by district
+    if (district) {
+      const districts = (district as string).split(',').map(s => s.trim()).filter(Boolean);
+      const blockRes = await pool.query(
+        "SELECT DISTINCT block FROM contacts WHERE block IS NOT NULL AND block != '' AND district = ANY($1) ORDER BY block",
+        [districts]
+      );
+      result.blocks = blockRes.rows.map((r) => r.block);
+    } else {
+      const blockRes = await pool.query(
+        "SELECT DISTINCT block FROM contacts WHERE block IS NOT NULL AND block != '' ORDER BY block"
+      );
+      result.blocks = blockRes.rows.map((r) => r.block);
+    }
+
+    // Categories
+    const catRes = await pool.query(
+      "SELECT DISTINCT category FROM contacts WHERE category IS NOT NULL AND category != '' ORDER BY category"
+    );
+    result.categories = catRes.rows.map((r) => r.category);
+
+    // Management types
+    const mgmtRes = await pool.query(
+      "SELECT DISTINCT management FROM contacts WHERE management IS NOT NULL AND management != '' ORDER BY management"
+    );
+    result.managements = mgmtRes.rows.map((r) => r.management);
+
+    res.json(result);
   } catch (err) {
     next(err);
   }

@@ -14,6 +14,7 @@ import Campaigns from './pages/Campaigns';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
 import Analytics from './pages/Analytics';
+import Import from './pages/Import';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('accessToken');
@@ -38,6 +39,7 @@ export default function App() {
                   <Route path="/campaigns/:id" element={<CampaignDetail />} />
                   <Route path="/contacts" element={<Contacts />} />
                   <Route path="/contacts/:id" element={<ContactDetail />} />
+                  <Route path="/import" element={<Import />} />
                   <Route path="/lists" element={<Lists />} />
                   <Route path="/lists/:id" element={<ListDetail />} />
                   <Route path="/templates" element={<Templates />} />

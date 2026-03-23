@@ -156,6 +156,24 @@ INSERT INTO settings (key, value) VALUES
     ('tracking_domain', '"http://yeb.mail.intellimix.online"')
 ON CONFLICT (key) DO NOTHING;
 
+-- School-specific columns on contacts
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS state varchar(100);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS district varchar(100);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS block varchar(100);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS classes varchar(50);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS category varchar(100);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS management varchar(100);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS address text;
+
+CREATE INDEX IF NOT EXISTS contacts_state_idx ON contacts(state);
+CREATE INDEX IF NOT EXISTS contacts_district_idx ON contacts(district);
+CREATE INDEX IF NOT EXISTS contacts_category_idx ON contacts(category);
+CREATE INDEX IF NOT EXISTS contacts_management_idx ON contacts(management);
+
+-- Smart list columns on contact_lists
+ALTER TABLE contact_lists ADD COLUMN IF NOT EXISTS is_smart boolean DEFAULT false;
+ALTER TABLE contact_lists ADD COLUMN IF NOT EXISTS filter_criteria jsonb;
+
 -- unsubscribes
 CREATE TABLE IF NOT EXISTS unsubscribes (
     id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
