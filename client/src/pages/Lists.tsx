@@ -1,53 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { listLists, createList, createSmartList, deleteList, ContactList, SmartFilterCriteria } from '../api/lists.api';
-import { getContactFilters, ContactFilters } from '../api/contacts.api';
+import { SmartFilterCriteria, ContactList } from '../api/lists.api';
+import { useListsList, useCreateList, useCreateSmartList, useDeleteList } from '../hooks/useLists';
+import { useContactFilters } from '../hooks/useFilters';
+import { GridCardSkeleton } from '../components/ui/Skeleton';
+import ErrorBoundary from '../components/ErrorBoundary';
 
-export default function Lists() {
-  const [lists, setLists] = useState<ContactList[]>([]);
-  const [loading, setLoading] = useState(true);
+function ListsContent() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateSmart, setShowCreateSmart] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const navigate = useNavigate();
 
-  async function fetchLists() {
-    try {
-      const data = await listLists();
-      setLists(data);
-    } catch {
-      toast.error('Failed to load lists');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { fetchLists(); }, []);
+  const { data: lists = [], isLoading, isError } = useListsList();
+  const createListMutation = useCreateList();
+  const deleteListMutation = useDeleteList();
 
   async function handleCreate() {
     try {
-      await createList({ name: newName, description: newDesc || undefined });
-      toast.success('List created');
+      await createListMutation.mutateAsync({ name: newName, description: newDesc || undefined });
       setShowCreate(false);
       setNewName('');
       setNewDesc('');
-      fetchLists();
     } catch {
-      toast.error('Failed to create list');
+      // error toast handled by mutation
     }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this list? Contacts will not be deleted.')) return;
-    try {
-      await deleteList(id);
-      toast.success('List deleted');
-      fetchLists();
-    } catch {
-      toast.error('Failed to delete');
-    }
+    deleteListMutation.mutate(id);
   }
 
   return (
@@ -62,48 +45,57 @@ export default function Lists() {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {loading ? (
-          <p className="text-gray-400">Loading...</p>
-        ) : lists.length === 0 ? (
-          <p className="text-gray-400">No lists yet. Create your first list to organize contacts.</p>
-        ) : lists.map((list) => (
-          <div key={list.id} className="cursor-pointer rounded-xl bg-white p-5 shadow-sm hover:shadow-md transition-shadow" onClick={() => navigate(`/lists/${list.id}`)}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-gray-900">{list.name}</h3>
-                {list.is_smart && (
-                  <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">Smart</span>
-                )}
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(list.id); }} className="text-xs text-red-500 hover:text-red-700">Delete</button>
-            </div>
-            {list.description && <p className="mt-1 text-sm text-gray-500">{list.description}</p>}
-            {list.is_smart && list.filter_criteria && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {list.filter_criteria.state && list.filter_criteria.state.length > 0 && (
-                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                    {list.filter_criteria.state.join(', ')}
-                  </span>
-                )}
-                {list.filter_criteria.category && list.filter_criteria.category.length > 0 && (
-                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                    {list.filter_criteria.category.length} categories
-                  </span>
-                )}
-                {list.filter_criteria.management && list.filter_criteria.management.length > 0 && (
-                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                    {list.filter_criteria.management.length} management types
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="mt-3 flex items-center gap-1 text-sm text-gray-600">
-              <span className="font-medium">{list.contact_count?.toLocaleString()}</span> contacts
-              {list.is_smart && <span className="text-xs text-purple-500">(dynamic)</span>}
-            </div>
+      <div className="mt-6">
+        {isLoading ? (
+          <GridCardSkeleton count={6} />
+        ) : isError ? (
+          <div className="rounded-xl bg-red-50 p-6 text-center">
+            <p className="text-red-700 font-medium">Failed to load lists</p>
+            <p className="mt-1 text-sm text-red-500">Please try refreshing the page.</p>
           </div>
-        ))}
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {lists.length === 0 ? (
+              <p className="text-gray-400">No lists yet. Create your first list to organize contacts.</p>
+            ) : lists.map((list: ContactList) => (
+              <div key={list.id} className="cursor-pointer rounded-xl bg-white p-5 shadow-sm hover:shadow-md transition-shadow" onClick={() => navigate(`/lists/${list.id}`)}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900">{list.name}</h3>
+                    {list.is_smart && (
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">Smart</span>
+                    )}
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); handleDelete(list.id); }} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+                </div>
+                {list.description && <p className="mt-1 text-sm text-gray-500">{list.description}</p>}
+                {list.is_smart && list.filter_criteria && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {list.filter_criteria.state && list.filter_criteria.state.length > 0 && (
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                        {list.filter_criteria.state.join(', ')}
+                      </span>
+                    )}
+                    {list.filter_criteria.category && list.filter_criteria.category.length > 0 && (
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                        {list.filter_criteria.category.length} categories
+                      </span>
+                    )}
+                    {list.filter_criteria.management && list.filter_criteria.management.length > 0 && (
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                        {list.filter_criteria.management.length} management types
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="mt-3 flex items-center gap-1 text-sm text-gray-600">
+                  <span className="font-medium">{list.contact_count?.toLocaleString()}</span> contacts
+                  {list.is_smart && <span className="text-xs text-purple-500">(dynamic)</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Create Regular List Modal */}
@@ -127,7 +119,7 @@ export default function Lists() {
       {showCreateSmart && (
         <SmartListModal
           onClose={() => setShowCreateSmart(false)}
-          onCreated={() => { setShowCreateSmart(false); fetchLists(); }}
+          onCreated={() => { setShowCreateSmart(false); }}
         />
       )}
     </div>
@@ -137,7 +129,6 @@ export default function Lists() {
 function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [filters, setFilters] = useState<ContactFilters | null>(null);
   const [criteria, setCriteria] = useState<SmartFilterCriteria>({
     state: [],
     district: [],
@@ -145,14 +136,13 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
     category: [],
     management: [],
   });
-  const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    const params: Record<string, string> = {};
-    if (criteria.state && criteria.state.length > 0) params.state = criteria.state.join(',');
-    if (criteria.district && criteria.district.length > 0) params.district = criteria.district.join(',');
-    getContactFilters(params).then(setFilters).catch(() => {});
-  }, [criteria.state, criteria.district]);
+  const { data: filters } = useContactFilters({
+    state: criteria.state && criteria.state.length > 0 ? criteria.state.join(',') : undefined,
+    district: criteria.district && criteria.district.length > 0 ? criteria.district.join(',') : undefined,
+  });
+
+  const createSmartListMutation = useCreateSmartList();
 
   function updateCriteria(field: keyof SmartFilterCriteria, value: string) {
     setCriteria((prev) => {
@@ -176,7 +166,6 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   async function handleCreate() {
     if (!name.trim()) return;
-    setCreating(true);
     try {
       // Clean up empty arrays
       const cleanCriteria: SmartFilterCriteria = {};
@@ -188,17 +177,14 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
       if (criteria.classes_min != null) cleanCriteria.classes_min = criteria.classes_min;
       if (criteria.classes_max != null) cleanCriteria.classes_max = criteria.classes_max;
 
-      await createSmartList({
+      await createSmartListMutation.mutateAsync({
         name,
         description: description || undefined,
         filterCriteria: cleanCriteria,
       });
-      toast.success('Smart list created');
       onCreated();
     } catch {
-      toast.error('Failed to create smart list');
-    } finally {
-      setCreating(false);
+      // error toast handled by mutation
     }
   }
 
@@ -245,7 +231,7 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option value="">All States</option>
-                  {filters.states.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {filters.states.map((s: string) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
@@ -256,7 +242,7 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option value="">All Districts</option>
-                  {filters.districts.map((d) => <option key={d} value={d}>{d}</option>)}
+                  {filters.districts.map((d: string) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
@@ -267,7 +253,7 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option value="">All Blocks</option>
-                  {filters.blocks.map((b) => <option key={b} value={b}>{b}</option>)}
+                  {filters.blocks.map((b: string) => <option key={b} value={b}>{b}</option>)}
                 </select>
               </div>
               <div>
@@ -278,7 +264,7 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option value="">All Categories</option>
-                  {filters.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {filters.categories.map((c: string) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
@@ -289,7 +275,7 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option value="">All Management Types</option>
-                  {filters.managements.map((m) => <option key={m} value={m}>{m}</option>)}
+                  {filters.managements.map((m: string) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -322,13 +308,21 @@ function SmartListModal({ onClose, onCreated }: { onClose: () => void; onCreated
           <button onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">Cancel</button>
           <button
             onClick={handleCreate}
-            disabled={!name.trim() || creating}
+            disabled={!name.trim() || createSmartListMutation.isPending}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
-            {creating ? 'Creating...' : 'Create Smart List'}
+            {createSmartListMutation.isPending ? 'Creating...' : 'Create Smart List'}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Lists() {
+  return (
+    <ErrorBoundary>
+      <ListsContent />
+    </ErrorBoundary>
   );
 }

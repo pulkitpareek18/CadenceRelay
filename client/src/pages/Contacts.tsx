@@ -1,28 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  listContacts,
   exportContacts,
-  createContact,
-  deleteContact,
-  bulkDeleteContacts,
-  getContactFilters,
   Contact,
-  ContactFilters,
 } from '../api/contacts.api';
-import { listLists, createSmartList, ContactList } from '../api/lists.api';
+import { createSmartList, ContactList } from '../api/lists.api';
+import { useContactsList, useCreateContact, useDeleteContact, useBulkDeleteContacts } from '../hooks/useContacts';
+import { useListsList } from '../hooks/useLists';
+import { useContactFilters } from '../hooks/useFilters';
+import { TableSkeleton } from '../components/ui/Skeleton';
+import ErrorBoundary from '../components/ErrorBoundary';
 import AdminPasswordModal from '../components/ui/AdminPasswordModal';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-export default function Contacts() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [lists, setLists] = useState<ContactList[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
+function ContactsContent() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -34,7 +29,6 @@ export default function Contacts() {
   const [blockFilter, setBlockFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [managementFilter, setManagementFilter] = useState('');
-  const [filters, setFilters] = useState<ContactFilters | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -46,45 +40,32 @@ export default function Contacts() {
   const [showFilters, setShowFilters] = useState(false);
   const navigate = useNavigate();
 
-  // Fetch filter options
-  const fetchFilters = useCallback(async () => {
-    try {
-      const params: Record<string, string> = {};
-      if (stateFilter) params.state = stateFilter;
-      if (districtFilter) params.district = districtFilter;
-      const f = await getContactFilters(params);
-      setFilters(f);
-    } catch {
-      // silently fail
-    }
-  }, [stateFilter, districtFilter]);
+  // React Query hooks
+  const { data: contactsData, isLoading, isError } = useContactsList({
+    page,
+    search: search || undefined,
+    status: statusFilter || undefined,
+    listId: listFilter || undefined,
+    state: stateFilter || undefined,
+    district: districtFilter || undefined,
+    block: blockFilter || undefined,
+    category: categoryFilter || undefined,
+    management: managementFilter || undefined,
+  });
 
-  useEffect(() => { fetchFilters(); }, [fetchFilters]);
+  const { data: lists = [] } = useListsList();
+  const { data: filters } = useContactFilters({
+    state: stateFilter || undefined,
+    district: districtFilter || undefined,
+  });
 
-  const fetchContacts = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = { page: String(page), limit: '50' };
-      if (search) params.search = search;
-      if (statusFilter) params.status = statusFilter;
-      if (listFilter) params.listId = listFilter;
-      if (stateFilter) params.state = stateFilter;
-      if (districtFilter) params.district = districtFilter;
-      if (blockFilter) params.block = blockFilter;
-      if (categoryFilter) params.category = categoryFilter;
-      if (managementFilter) params.management = managementFilter;
-      const res = await listContacts(params);
-      setContacts(res.data);
-      setTotal(res.pagination.total);
-    } catch {
-      toast.error('Failed to load contacts');
-    } finally {
-      setLoading(false);
-    }
-  }, [page, search, statusFilter, listFilter, stateFilter, districtFilter, blockFilter, categoryFilter, managementFilter]);
+  const createContactMutation = useCreateContact();
+  const deleteContactMutation = useDeleteContact();
+  const bulkDeleteMutation = useBulkDeleteContacts();
 
-  useEffect(() => { fetchContacts(); }, [fetchContacts]);
-  useEffect(() => { listLists().then(setLists).catch(() => {}); }, []);
+  const contacts: Contact[] = contactsData?.data || [];
+  const total = contactsData?.pagination?.total || 0;
+  const totalPages = Math.ceil(total / 50);
 
   // Clear selection when page/filters change
   useEffect(() => { setSelectedIds(new Set()); }, [page, search, statusFilter, listFilter, stateFilter, districtFilter, blockFilter, categoryFilter, managementFilter]);
@@ -121,16 +102,18 @@ export default function Contacts() {
     }
     setEmailError('');
     try {
-      await createContact({ email: newEmail, name: newName || undefined, listIds: newListId ? [newListId] : undefined });
-      toast.success('Contact added');
+      await createContactMutation.mutateAsync({
+        email: newEmail,
+        name: newName || undefined,
+        listIds: newListId ? [newListId] : undefined,
+      });
       setShowAddModal(false);
       setNewEmail('');
       setNewName('');
       setNewListId('');
       setEmailError('');
-      fetchContacts();
     } catch {
-      toast.error('Failed to add contact');
+      // error toast handled by mutation
     }
   }
 
@@ -138,17 +121,14 @@ export default function Contacts() {
     if (!deleteModal) return;
 
     if (deleteModal.type === 'single' && deleteModal.id) {
-      await deleteContact(deleteModal.id, password);
-      toast.success('Contact deleted');
+      await deleteContactMutation.mutateAsync({ id: deleteModal.id, adminPassword: password });
     } else if (deleteModal.type === 'bulk') {
       const ids = Array.from(selectedIds);
-      await bulkDeleteContacts(ids, password);
-      toast.success(`${ids.length} contact(s) deleted`);
+      await bulkDeleteMutation.mutateAsync({ ids, adminPassword: password });
       setSelectedIds(new Set());
     }
 
     setDeleteModal(null);
-    fetchContacts();
   }
 
   const activeFilterCount = [stateFilter, districtFilter, blockFilter, categoryFilter, managementFilter].filter(Boolean).length;
@@ -180,13 +160,10 @@ export default function Contacts() {
         filterCriteria,
       });
       toast.success('Smart list created');
-      listLists().then(setLists).catch(() => {});
     } catch {
       toast.error('Failed to create smart list');
     }
   }
-
-  const totalPages = Math.ceil(total / 50);
 
   return (
     <div className="p-6">
@@ -233,7 +210,7 @@ export default function Contacts() {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
         >
           <option value="">All Lists</option>
-          {lists.map((l) => <option key={l.id} value={l.id}>{l.name}{l.is_smart ? ' (Smart)' : ''}</option>)}
+          {lists.map((l: ContactList) => <option key={l.id} value={l.id}>{l.name}{l.is_smart ? ' (Smart)' : ''}</option>)}
         </select>
         <button
           onClick={() => setShowFilters(!showFilters)}
@@ -282,7 +259,7 @@ export default function Contacts() {
                 className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All States</option>
-                {filters.states.map((s) => <option key={s} value={s}>{s}</option>)}
+                {filters.states.map((s: string) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div>
@@ -293,7 +270,7 @@ export default function Contacts() {
                 className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All Districts</option>
-                {filters.districts.map((d) => <option key={d} value={d}>{d}</option>)}
+                {filters.districts.map((d: string) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
             <div>
@@ -304,7 +281,7 @@ export default function Contacts() {
                 className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All Blocks</option>
-                {filters.blocks.map((b) => <option key={b} value={b}>{b}</option>)}
+                {filters.blocks.map((b: string) => <option key={b} value={b}>{b}</option>)}
               </select>
             </div>
             <div>
@@ -315,7 +292,7 @@ export default function Contacts() {
                 className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All Categories</option>
-                {filters.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                {filters.categories.map((c: string) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
@@ -326,7 +303,7 @@ export default function Contacts() {
                 className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All Management</option>
-                {filters.managements.map((m) => <option key={m} value={m}>{m}</option>)}
+                {filters.managements.map((m: string) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
           </div>
@@ -375,94 +352,105 @@ export default function Contacts() {
       </div>
 
       {/* Table */}
-      <div className="mt-2 overflow-hidden rounded-xl bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="w-10 px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={contacts.length > 0 && selectedIds.size === contacts.length}
-                    onChange={toggleSelectAll}
-                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">State</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">District</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Category</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Sent</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
-              ) : contacts.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center">
-                    <div className="text-gray-400">
-                      <p className="text-lg font-medium">No contacts found</p>
-                      <p className="mt-1 text-sm">
-                        {search || statusFilter || listFilter || activeFilterCount > 0
-                          ? 'Try adjusting your search filters'
-                          : 'Get started by adding your first contact or importing a CSV file'}
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-              ) : contacts.map((c) => (
-                <tr key={c.id} className={`hover:bg-gray-50 cursor-pointer ${selectedIds.has(c.id) ? 'bg-primary-50' : ''}`}>
-                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(c.id)}
-                      onChange={() => toggleSelect(c.id)}
-                      className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                  </td>
-                  <td className="px-4 py-3 max-w-[200px] truncate" onClick={() => navigate(`/contacts/${c.id}`)} title={c.name || ''}>{c.name || '-'}</td>
-                  <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.email}</td>
-                  <td className="px-4 py-3 text-xs" onClick={() => navigate(`/contacts/${c.id}`)}>{c.state || '-'}</td>
-                  <td className="px-4 py-3 text-xs" onClick={() => navigate(`/contacts/${c.id}`)}>{c.district || '-'}</td>
-                  <td className="px-4 py-3 text-xs max-w-[150px] truncate" onClick={() => navigate(`/contacts/${c.id}`)} title={c.category || ''}>{c.category || '-'}</td>
-                  <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                      c.status === 'active' ? 'bg-green-100 text-green-700' :
-                      c.status === 'bounced' ? 'bg-red-100 text-red-700' :
-                      c.status === 'complained' ? 'bg-orange-100 text-orange-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>{c.status}</span>
-                  </td>
-                  <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.send_count}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setDeleteModal({ type: 'single', id: c.id }); }}
-                      className="text-red-600 hover:text-red-800 text-xs"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {isLoading ? (
+        <div className="mt-2">
+          <TableSkeleton rows={8} columns={9} />
         </div>
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-          <span>{total.toLocaleString()} contacts total</span>
-          <div className="flex gap-2">
-            <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Prev</button>
-            <span className="px-3 py-1">Page {page} of {totalPages}</span>
-            <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Next</button>
+      ) : isError ? (
+        <div className="mt-2 rounded-xl bg-red-50 p-6 text-center">
+          <p className="text-red-700 font-medium">Failed to load contacts</p>
+          <p className="mt-1 text-sm text-red-500">Please try refreshing the page.</p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-2 overflow-hidden rounded-xl bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="w-10 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={contacts.length > 0 && selectedIds.size === contacts.length}
+                        onChange={toggleSelectAll}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">State</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">District</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Category</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Sent</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {contacts.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-12 text-center">
+                        <div className="text-gray-400">
+                          <p className="text-lg font-medium">No contacts found</p>
+                          <p className="mt-1 text-sm">
+                            {search || statusFilter || listFilter || activeFilterCount > 0
+                              ? 'Try adjusting your search filters'
+                              : 'Get started by adding your first contact or importing a CSV file'}
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : contacts.map((c) => (
+                    <tr key={c.id} className={`hover:bg-gray-50 cursor-pointer ${selectedIds.has(c.id) ? 'bg-primary-50' : ''}`}>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(c.id)}
+                          onChange={() => toggleSelect(c.id)}
+                          className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                      </td>
+                      <td className="px-4 py-3 max-w-[200px] truncate" onClick={() => navigate(`/contacts/${c.id}`)} title={c.name || ''}>{c.name || '-'}</td>
+                      <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.email}</td>
+                      <td className="px-4 py-3 text-xs" onClick={() => navigate(`/contacts/${c.id}`)}>{c.state || '-'}</td>
+                      <td className="px-4 py-3 text-xs" onClick={() => navigate(`/contacts/${c.id}`)}>{c.district || '-'}</td>
+                      <td className="px-4 py-3 text-xs max-w-[150px] truncate" onClick={() => navigate(`/contacts/${c.id}`)} title={c.category || ''}>{c.category || '-'}</td>
+                      <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                          c.status === 'active' ? 'bg-green-100 text-green-700' :
+                          c.status === 'bounced' ? 'bg-red-100 text-red-700' :
+                          c.status === 'complained' ? 'bg-orange-100 text-orange-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>{c.status}</span>
+                      </td>
+                      <td className="px-4 py-3" onClick={() => navigate(`/contacts/${c.id}`)}>{c.send_count}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteModal({ type: 'single', id: c.id }); }}
+                          className="text-red-600 hover:text-red-800 text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
+              <span>{total.toLocaleString()} contacts total</span>
+              <div className="flex gap-2">
+                <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Prev</button>
+                <span className="px-3 py-1">Page {page} of {totalPages}</span>
+                <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="rounded border px-3 py-1 disabled:opacity-50 hover:bg-gray-50">Next</button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Delete Confirmation Modal */}
@@ -499,7 +487,7 @@ export default function Contacts() {
               <input type="text" placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
               <select value={newListId} onChange={(e) => setNewListId(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
                 <option value="">No list</option>
-                {lists.filter(l => !l.is_smart).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {lists.filter((l: ContactList) => !l.is_smart).map((l: ContactList) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
             <div className="mt-4 flex justify-end gap-2">
@@ -510,5 +498,13 @@ export default function Contacts() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Contacts() {
+  return (
+    <ErrorBoundary>
+      <ContactsContent />
+    </ErrorBoundary>
   );
 }

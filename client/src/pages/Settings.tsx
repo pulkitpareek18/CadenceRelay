@@ -1,21 +1,26 @@
 import { useState, useEffect, FormEvent } from 'react';
 import toast from 'react-hot-toast';
 import {
-  getSettings,
-  updateProvider,
-  updateGmailConfig,
-  updateSesConfig,
-  updateThrottleDefaults,
-  updateReplyTo,
   sendTestEmail,
 } from '../api/settings.api';
 import { clearHistory } from '../api/admin.api';
+import {
+  useSettings,
+  useUpdateProvider,
+  useUpdateGmailConfig,
+  useUpdateSesConfig,
+  useUpdateThrottleDefaults,
+  useUpdateReplyTo,
+} from '../hooks/useSettings';
+import { FormSkeleton } from '../components/ui/Skeleton';
+import ErrorBoundary from '../components/ErrorBoundary';
 import AdminPasswordModal from '../components/ui/AdminPasswordModal';
 
 type ConnectionStatus = 'idle' | 'testing' | 'success' | 'error';
 
-export default function Settings() {
-  const [loading, setLoading] = useState(true);
+function SettingsContent() {
+  const { data: settingsData, isLoading, isError } = useSettings();
+
   const [provider, setProvider] = useState<'gmail' | 'ses'>('ses');
   const [gmail, setGmail] = useState({ host: 'smtp.gmail.com', port: 587, user: '', pass: '' });
   const [ses, setSes] = useState({ region: 'ap-south-1', accessKeyId: '', secretAccessKey: '', fromEmail: '' });
@@ -23,7 +28,6 @@ export default function Settings() {
   const [replyTo, setReplyTo] = useState('');
   const [replyToError, setReplyToError] = useState('');
   const [testTo, setTestTo] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const [gmailStatus, setGmailStatus] = useState<ConnectionStatus>('idle');
   const [sesStatus, setSesStatus] = useState<ConnectionStatus>('idle');
@@ -33,33 +37,26 @@ export default function Settings() {
 
   const [clearHistoryModal, setClearHistoryModal] = useState<'campaigns' | 'contacts' | 'all' | null>(null);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
+  const updateProviderMutation = useUpdateProvider();
+  const updateGmailMutation = useUpdateGmailConfig();
+  const updateSesMutation = useUpdateSesConfig();
+  const updateThrottleMutation = useUpdateThrottleDefaults();
+  const updateReplyToMutation = useUpdateReplyTo();
 
-  async function loadSettings() {
-    try {
-      const settings = await getSettings();
-      if (settings.email_provider) setProvider(settings.email_provider);
-      if (settings.gmail_config) setGmail(settings.gmail_config);
-      if (settings.ses_config) setSes(settings.ses_config);
-      if (settings.throttle_defaults) setThrottle(settings.throttle_defaults);
-      if (settings.reply_to) setReplyTo(settings.reply_to);
-    } catch {
-      toast.error('Failed to load settings');
-    } finally {
-      setLoading(false);
+  // Populate form when settings load
+  useEffect(() => {
+    if (settingsData) {
+      if (settingsData.email_provider) setProvider(settingsData.email_provider);
+      if (settingsData.gmail_config) setGmail(settingsData.gmail_config);
+      if (settingsData.ses_config) setSes(settingsData.ses_config);
+      if (settingsData.throttle_defaults) setThrottle(settingsData.throttle_defaults);
+      if (settingsData.reply_to) setReplyTo(settingsData.reply_to);
     }
-  }
+  }, [settingsData]);
 
   async function handleProviderSwitch(p: 'gmail' | 'ses') {
     setProvider(p);
-    try {
-      await updateProvider(p);
-      toast.success(`Switched to ${p.toUpperCase()}`);
-    } catch {
-      toast.error('Failed to switch provider');
-    }
+    updateProviderMutation.mutate(p);
   }
 
   function validateGmail(): boolean {
@@ -85,22 +82,14 @@ export default function Settings() {
   async function handleSaveGmail(e: FormEvent) {
     e.preventDefault();
     if (!validateGmail()) return;
-    setSaving(true);
-    try {
-      await updateGmailConfig(gmail);
-      toast.success('Gmail config saved');
-    } catch {
-      toast.error('Failed to save Gmail config');
-    } finally {
-      setSaving(false);
-    }
+    updateGmailMutation.mutate(gmail);
   }
 
   async function handleTestGmail() {
     if (!validateGmail()) return;
     setGmailStatus('testing');
     try {
-      await updateGmailConfig(gmail);
+      await updateGmailMutation.mutateAsync(gmail);
       await sendTestEmail(gmail.user);
       setGmailStatus('success');
       toast.success('Gmail connection test passed');
@@ -113,22 +102,14 @@ export default function Settings() {
   async function handleSaveSes(e: FormEvent) {
     e.preventDefault();
     if (!validateSes()) return;
-    setSaving(true);
-    try {
-      await updateSesConfig(ses);
-      toast.success('SES config saved');
-    } catch {
-      toast.error('Failed to save SES config');
-    } finally {
-      setSaving(false);
-    }
+    updateSesMutation.mutate(ses);
   }
 
   async function handleTestSes() {
     if (!validateSes()) return;
     setSesStatus('testing');
     try {
-      await updateSesConfig(ses);
+      await updateSesMutation.mutateAsync(ses);
       await sendTestEmail(ses.fromEmail);
       setSesStatus('success');
       toast.success('SES connection test passed');
@@ -140,15 +121,7 @@ export default function Settings() {
 
   async function handleSaveThrottle(e: FormEvent) {
     e.preventDefault();
-    setSaving(true);
-    try {
-      await updateThrottleDefaults(throttle);
-      toast.success('Throttle defaults saved');
-    } catch {
-      toast.error('Failed to save throttle config');
-    } finally {
-      setSaving(false);
-    }
+    updateThrottleMutation.mutate(throttle);
   }
 
   async function handleSaveReplyTo(e: FormEvent) {
@@ -158,15 +131,7 @@ export default function Settings() {
       return;
     }
     setReplyToError('');
-    setSaving(true);
-    try {
-      await updateReplyTo(replyTo);
-      toast.success('Reply-To address saved');
-    } catch {
-      toast.error('Failed to save Reply-To address');
-    } finally {
-      setSaving(false);
-    }
+    updateReplyToMutation.mutate(replyTo);
   }
 
   async function handleTestEmail(e: FormEvent) {
@@ -179,8 +144,25 @@ export default function Settings() {
     }
   }
 
-  if (loading) {
-    return <div className="flex h-64 items-center justify-center"><div className="text-gray-500">Loading...</div></div>;
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-4xl p-6 space-y-6">
+        <FormSkeleton fields={2} />
+        <FormSkeleton fields={4} />
+        <FormSkeleton fields={2} />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="mx-auto max-w-4xl p-6">
+        <div className="rounded-xl bg-red-50 p-6 text-center">
+          <p className="text-red-700 font-medium">Failed to load settings</p>
+          <p className="mt-1 text-sm text-red-500">Please try refreshing the page.</p>
+        </div>
+      </div>
+    );
   }
 
   function StatusIndicator({ status }: { status: ConnectionStatus }) {
@@ -194,6 +176,8 @@ export default function Settings() {
     `mt-1 block w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-1 ${
       error ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
     }`;
+
+  const saving = updateGmailMutation.isPending || updateSesMutation.isPending || updateThrottleMutation.isPending || updateReplyToMutation.isPending;
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -457,5 +441,13 @@ export default function Settings() {
         />
       )}
     </div>
+  );
+}
+
+export default function Settings() {
+  return (
+    <ErrorBoundary>
+      <SettingsContent />
+    </ErrorBoundary>
   );
 }

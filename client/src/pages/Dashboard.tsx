@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import toast from 'react-hot-toast';
-import { getDashboardData } from '../api/analytics.api';
+import { useDashboard } from '../hooks/useDashboard';
+import { DashboardSkeleton } from '../components/ui/Skeleton';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 interface DashboardData {
   stats: {
@@ -47,22 +47,23 @@ function rate(val: string | number | undefined | null): string {
   return n.toFixed(1);
 }
 
-export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+function DashboardContent() {
+  const { data, isLoading, isError, error } = useDashboard();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    getDashboardData()
-      .then(setData)
-      .catch(() => toast.error('Failed to load dashboard'))
-      .finally(() => setLoading(false));
-  }, []);
+  if (isLoading) return <DashboardSkeleton />;
+  if (isError) return (
+    <div className="p-6">
+      <div className="rounded-xl bg-red-50 p-6 text-center">
+        <p className="text-red-700 font-medium">Failed to load dashboard</p>
+        <p className="mt-1 text-sm text-red-500">{(error as Error)?.message || 'An unexpected error occurred'}</p>
+      </div>
+    </div>
+  );
+  if (!data) return <div className="p-6">No data available</div>;
 
-  if (loading) return <div className="flex h-64 items-center justify-center text-gray-500">Loading dashboard...</div>;
-  if (!data) return <div className="p-6">Failed to load data</div>;
-
-  const { stats, volume, recentCampaigns, contactStats } = data;
+  const typedData = data as DashboardData;
+  const { stats, volume, recentCampaigns, contactStats } = typedData;
 
   // Convert volume data from strings to numbers for charts
   const volumeData = volume.map((v) => ({
@@ -184,5 +185,13 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <ErrorBoundary>
+      <DashboardContent />
+    </ErrorBoundary>
   );
 }

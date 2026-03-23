@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { previewCSV, importContactsCSV, CSVPreviewResult, CSVImportResult } from '../api/contacts.api';
-import { listLists, ContactList } from '../api/lists.api';
+import { ContactList } from '../api/lists.api';
+import { useListsList } from '../hooks/useLists';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 const DB_COLUMNS = [
   { value: '', label: '-- Skip --' },
@@ -16,21 +18,18 @@ const DB_COLUMNS = [
   { value: 'address', label: 'Address' },
 ];
 
-export default function Import() {
+function ImportContent() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<CSVPreviewResult | null>(null);
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [listId, setListId] = useState('');
-  const [lists, setLists] = useState<ContactList[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [result, setResult] = useState<CSVImportResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    listLists().then(setLists).catch(() => {});
-  }, []);
+  const { data: lists = [] } = useListsList();
 
   const handleFile = useCallback(async (f: File) => {
     if (!f.name.endsWith('.csv')) {
@@ -91,12 +90,15 @@ export default function Import() {
 
     setUploading(true);
     setUploadProgress(0);
+    const loadingToast = toast.loading('Importing contacts...');
     try {
       const res = await importContactsCSV(file, listId || undefined, columnMapping, setUploadProgress);
       setResult(res);
-      toast.success(`Imported ${res.imported} contacts`);
+      toast.dismiss(loadingToast);
+      toast.success(`Imported ${res.imported} contacts successfully`);
     } catch {
-      toast.error('Import failed');
+      toast.dismiss(loadingToast);
+      toast.error('Import failed. Please check the file format and try again.');
     } finally {
       setUploading(false);
     }
@@ -256,7 +258,7 @@ export default function Import() {
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm sm:max-w-xs"
                 >
                   <option value="">No list - import contacts only</option>
-                  {lists.filter(l => !l.is_smart).map((l) => (
+                  {lists.filter((l: ContactList) => !l.is_smart).map((l: ContactList) => (
                     <option key={l.id} value={l.id}>{l.name}</option>
                   ))}
                 </select>
@@ -354,5 +356,13 @@ export default function Import() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Import() {
+  return (
+    <ErrorBoundary>
+      <ImportContent />
+    </ErrorBoundary>
   );
 }

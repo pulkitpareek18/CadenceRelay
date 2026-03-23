@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -25,34 +26,36 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          path="/*"
-          element={
-            <ProtectedRoute>
-              <DashboardLayout>
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/campaigns" element={<Campaigns />} />
-                  <Route path="/campaigns/new" element={<CampaignCreate />} />
-                  <Route path="/campaigns/:id" element={<CampaignDetail />} />
-                  <Route path="/contacts" element={<Contacts />} />
-                  <Route path="/contacts/:id" element={<ContactDetail />} />
-                  <Route path="/import" element={<Import />} />
-                  <Route path="/lists" element={<Lists />} />
-                  <Route path="/lists/:id" element={<ListDetail />} />
-                  <Route path="/templates" element={<Templates />} />
-                  <Route path="/templates/new" element={<TemplateEditor />} />
-                  <Route path="/templates/:id/edit" element={<TemplateEditor />} />
-                  <Route path="/analytics" element={<Analytics />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Routes>
-              </DashboardLayout>
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <DashboardLayout>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/campaigns" element={<Campaigns />} />
+                    <Route path="/campaigns/new" element={<CampaignCreate />} />
+                    <Route path="/campaigns/:id" element={<CampaignDetail />} />
+                    <Route path="/contacts" element={<Contacts />} />
+                    <Route path="/contacts/:id" element={<ContactDetail />} />
+                    <Route path="/import" element={<Import />} />
+                    <Route path="/lists" element={<Lists />} />
+                    <Route path="/lists/:id" element={<ListDetail />} />
+                    <Route path="/templates" element={<Templates />} />
+                    <Route path="/templates/new" element={<TemplateEditor />} />
+                    <Route path="/templates/:id/edit" element={<TemplateEditor />} />
+                    <Route path="/analytics" element={<Analytics />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </DashboardLayout>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </ErrorBoundary>
     </AuthProvider>
   );
 }

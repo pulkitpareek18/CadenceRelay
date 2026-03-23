@@ -10,6 +10,7 @@ import analyticsRoutes from './analytics.routes';
 import adminRoutes from './admin.routes';
 import trackingRoutes from './tracking.routes';
 import webhookRoutes from './webhooks.routes';
+import sseRoutes from './sse.routes';
 
 const router = Router();
 
@@ -38,5 +39,8 @@ router.use('/t', trackingRoutes);
 router.use('/webhooks', webhookRoutes);
 
 router.use('/analytics', authenticate, analyticsRoutes);
+
+// SSE routes (authenticated)
+router.use('/sse', sseRoutes);
 
 export default router;
