@@ -30,7 +30,7 @@ export async function updateThrottleDefaults(config: { perSecond: number; perHou
   return res.data;
 }
 
-export async function sendTestEmail(to: string) {
-  const res = await apiClient.post('/settings/test-email', { to });
+export async function sendTestEmail(to: string, options?: { subject?: string; html?: string }) {
+  const res = await apiClient.post('/settings/test-email', { to, ...options });
   return res.data;
 }

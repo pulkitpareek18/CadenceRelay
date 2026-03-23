@@ -130,7 +130,7 @@ export async function updateThrottleDefaults(req: Request, res: Response, next: 
 
 export async function testEmail(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { to } = req.body;
+    const { to, subject, html } = req.body;
     if (!to) {
       throw new AppError('Recipient email required', 400);
     }
@@ -173,11 +173,15 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
     const { createProvider } = await import('../services/email/providerFactory');
     const emailProvider = createProvider(provider, parsedConfig);
 
+    const emailSubject = subject || 'Test Email from CadenceRelay';
+    const emailHtml = html || '<h1>Test Email</h1><p>If you received this, your email provider is configured correctly.</p>';
+    const emailText = html ? undefined : 'Test Email - If you received this, your email provider is configured correctly.';
+
     await emailProvider.send({
       to,
-      subject: 'Test Email from CadenceRelay',
-      html: '<h1>Test Email</h1><p>If you received this, your email provider is configured correctly.</p>',
-      text: 'Test Email - If you received this, your email provider is configured correctly.',
+      subject: emailSubject,
+      html: emailHtml,
+      text: emailText,
     });
 
     res.json({ message: `Test email sent to ${to} via ${provider}` });

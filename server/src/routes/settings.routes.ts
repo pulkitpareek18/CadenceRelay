@@ -37,6 +37,8 @@ const throttleSchema = z.object({
 
 const testEmailSchema = z.object({
   to: z.string().email(),
+  subject: z.string().optional(),
+  html: z.string().optional(),
 });
 
 router.get('/', getSettings);

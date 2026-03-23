@@ -147,7 +147,7 @@ export default function TemplateEditor() {
     }
     setSendingTest(true);
     try {
-      await sendTestEmail(testEmail);
+      await sendTestEmail(testEmail, { subject: subject || 'Test Email from CadenceRelay', html: htmlBody });
       toast.success(`Test email sent to ${testEmail}`);
       setShowTestModal(false);
       setTestEmail('');
