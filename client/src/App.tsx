@@ -9,6 +9,9 @@ import ContactDetail from './pages/ContactDetail';
 import Lists from './pages/Lists';
 import Templates from './pages/Templates';
 import TemplateEditor from './pages/TemplateEditor';
+import Campaigns from './pages/Campaigns';
+import CampaignCreate from './pages/CampaignCreate';
+import CampaignDetail from './pages/CampaignDetail';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('accessToken');
@@ -28,7 +31,9 @@ export default function App() {
               <DashboardLayout>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
-                  <Route path="/campaigns" element={<div className="p-6">Campaigns (Sprint 5)</div>} />
+                  <Route path="/campaigns" element={<Campaigns />} />
+                  <Route path="/campaigns/new" element={<CampaignCreate />} />
+                  <Route path="/campaigns/:id" element={<CampaignDetail />} />
                   <Route path="/contacts" element={<Contacts />} />
                   <Route path="/contacts/:id" element={<ContactDetail />} />
                   <Route path="/lists" element={<Lists />} />
