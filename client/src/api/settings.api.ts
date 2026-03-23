@@ -25,6 +25,11 @@ export async function updateSesConfig(config: {
   return res.data;
 }
 
+export async function updateReplyTo(replyTo: string) {
+  const res = await apiClient.put('/settings/reply-to', { replyTo });
+  return res.data;
+}
+
 export async function updateThrottleDefaults(config: { perSecond: number; perHour: number }) {
   const res = await apiClient.put('/settings/throttle', config);
   return res.data;

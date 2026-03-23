@@ -35,6 +35,7 @@ interface SendJobData {
   trackingToken: string;
   trackingDomain: string;
   attachments?: AttachmentMeta[];
+  replyTo?: string;
 }
 
 export function startCampaignDispatchWorker(): Worker {
@@ -72,6 +73,20 @@ export function startCampaignDispatchWorker(): Worker {
       // Load tracking domain
       const trackingResult = await pool.query("SELECT value FROM settings WHERE key = 'tracking_domain'");
       const trackingDomain = trackingResult.rows[0]?.value || 'http://localhost:3001';
+
+      // Load reply-to setting
+      const replyToResult = await pool.query("SELECT value FROM settings WHERE key = 'reply_to'");
+      let replyTo: string | undefined;
+      if (replyToResult.rows[0]?.value) {
+        try {
+          const parsed = JSON.parse(replyToResult.rows[0].value);
+          if (typeof parsed === 'string' && parsed.length > 0) {
+            replyTo = parsed;
+          }
+        } catch {
+          // not JSON or invalid, skip
+        }
+      }
 
       // Load campaign attachments
       const campaignAttachments: AttachmentMeta[] = campaign.attachments || [];
@@ -128,6 +143,7 @@ export function startCampaignDispatchWorker(): Worker {
           trackingToken,
           trackingDomain,
           attachments: campaignAttachments,
+          replyTo,
         } as SendJobData, {
           // Rate limiting delay based on throttle settings
           delay: 0,
@@ -153,7 +169,7 @@ export function startEmailSendWorker(): Worker {
   const worker = new Worker<SendJobData>(
     'email-send',
     async (job: Job<SendJobData>) => {
-      const { campaignRecipientId, campaignId, email, subject, html, text, provider, providerConfig, trackingToken, trackingDomain } = job.data;
+      const { campaignRecipientId, campaignId, email, subject, html, text, provider, providerConfig, trackingToken, trackingDomain, replyTo } = job.data;
 
       // Check if campaign is paused
       const campCheck = await pool.query('SELECT status FROM campaigns WHERE id = $1', [campaignId]);
@@ -217,6 +233,7 @@ export function startEmailSendWorker(): Worker {
           subject,
           html: trackedHtml,
           text: text || undefined,
+          replyTo,
           headers,
           attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
         });

@@ -6,6 +6,7 @@ import {
   updateGmailConfig,
   updateSesConfig,
   updateThrottleDefaults,
+  updateReplyTo,
   sendTestEmail,
 } from '../api/settings.api';
 
@@ -17,6 +18,8 @@ export default function Settings() {
   const [gmail, setGmail] = useState({ host: 'smtp.gmail.com', port: 587, user: '', pass: '' });
   const [ses, setSes] = useState({ region: 'ap-south-1', accessKeyId: '', secretAccessKey: '', fromEmail: '' });
   const [throttle, setThrottle] = useState({ perSecond: 5, perHour: 5000 });
+  const [replyTo, setReplyTo] = useState('');
+  const [replyToError, setReplyToError] = useState('');
   const [testTo, setTestTo] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -37,6 +40,7 @@ export default function Settings() {
       if (settings.gmail_config) setGmail(settings.gmail_config);
       if (settings.ses_config) setSes(settings.ses_config);
       if (settings.throttle_defaults) setThrottle(settings.throttle_defaults);
+      if (settings.reply_to) setReplyTo(settings.reply_to);
     } catch {
       toast.error('Failed to load settings');
     } finally {
@@ -138,6 +142,24 @@ export default function Settings() {
       toast.success('Throttle defaults saved');
     } catch {
       toast.error('Failed to save throttle config');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveReplyTo(e: FormEvent) {
+    e.preventDefault();
+    if (replyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo)) {
+      setReplyToError('Please enter a valid email address');
+      return;
+    }
+    setReplyToError('');
+    setSaving(true);
+    try {
+      await updateReplyTo(replyTo);
+      toast.success('Reply-To address saved');
+    } catch {
+      toast.error('Failed to save Reply-To address');
     } finally {
       setSaving(false);
     }
@@ -280,6 +302,28 @@ export default function Settings() {
           </div>
         </form>
       )}
+
+      {/* Reply-To Address */}
+      <form onSubmit={handleSaveReplyTo} className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-900">Reply-To Address</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Set a custom reply-to email address. When recipients reply to your emails, responses will be sent to this address instead of the sender address. Leave blank to use the default sender address.
+        </p>
+        <div className="mt-4 max-w-md">
+          <label className="block text-sm font-medium text-gray-700">Reply-To Email</label>
+          <input
+            type="email"
+            value={replyTo}
+            onChange={(e) => { setReplyTo(e.target.value); setReplyToError(''); }}
+            placeholder="replies@yourdomain.com"
+            className={inputClass(replyToError)}
+          />
+          {replyToError && <p className="mt-1 text-xs text-red-500">{replyToError}</p>}
+        </div>
+        <button type="submit" disabled={saving} className="mt-4 rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save Reply-To Address'}
+        </button>
+      </form>
 
       {/* Throttle Defaults */}
       <form onSubmit={handleSaveThrottle} className="mt-6 rounded-xl bg-white p-6 shadow-sm">

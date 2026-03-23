@@ -5,6 +5,7 @@ import {
   updateGmailConfig,
   updateSesConfig,
   updateThrottleDefaults,
+  updateReplyTo,
   testEmail,
 } from '../controllers/settings.controller';
 import { validateBody } from '../middleware/validateRequest';
@@ -35,6 +36,10 @@ const throttleSchema = z.object({
   perHour: z.number().min(1).max(100000),
 });
 
+const replyToSchema = z.object({
+  replyTo: z.union([z.string().email(), z.literal('')]),
+});
+
 const testEmailSchema = z.object({
   to: z.string().email(),
   subject: z.string().optional(),
@@ -46,6 +51,7 @@ router.put('/provider', validateBody(providerSchema), updateProvider);
 router.put('/gmail', validateBody(gmailSchema), updateGmailConfig);
 router.put('/ses', validateBody(sesSchema), updateSesConfig);
 router.put('/throttle', validateBody(throttleSchema), updateThrottleDefaults);
+router.put('/reply-to', validateBody(replyToSchema), updateReplyTo);
 router.post('/test-email', validateBody(testEmailSchema), testEmail);
 
 export default router;

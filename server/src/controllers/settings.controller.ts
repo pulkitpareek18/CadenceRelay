@@ -128,6 +128,31 @@ export async function updateThrottleDefaults(req: Request, res: Response, next: 
   }
 }
 
+export async function updateReplyTo(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { replyTo } = req.body;
+    // Allow empty string to clear the setting
+    const value = replyTo || '';
+
+    const exists = await pool.query("SELECT 1 FROM settings WHERE key = 'reply_to'");
+    if (exists.rows.length > 0) {
+      await pool.query(
+        "UPDATE settings SET value = $1, updated_at = NOW() WHERE key = 'reply_to'",
+        [JSON.stringify(value)]
+      );
+    } else {
+      await pool.query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('reply_to', $1, NOW())",
+        [JSON.stringify(value)]
+      );
+    }
+
+    res.json({ message: 'Reply-To updated', replyTo: value });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function testEmail(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { to, subject, html } = req.body;
@@ -169,6 +194,20 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
       }
     }
 
+    // Load reply_to setting
+    const replyToResult = await pool.query("SELECT value FROM settings WHERE key = 'reply_to'");
+    let replyTo: string | undefined;
+    if (replyToResult.rows[0]?.value) {
+      try {
+        const parsed = JSON.parse(replyToResult.rows[0].value);
+        if (typeof parsed === 'string' && parsed.length > 0) {
+          replyTo = parsed;
+        }
+      } catch {
+        // not JSON or invalid, skip
+      }
+    }
+
     // Import and use provider factory
     const { createProvider } = await import('../services/email/providerFactory');
     const emailProvider = createProvider(provider, parsedConfig);
@@ -182,6 +221,7 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
       subject: emailSubject,
       html: emailHtml,
       text: emailText,
+      replyTo,
     });
 
     res.json({ message: `Test email sent to ${to} via ${provider}` });
