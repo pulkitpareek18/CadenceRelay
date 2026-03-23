@@ -1,0 +1,36 @@
+# Test profile: docker compose -f docker-compose.yml -f docker-compose.test.yml up
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: bulk_email_test
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.dev
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bulk_email_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/bulk_email_test
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: test-jwt-secret
+      JWT_REFRESH_SECRET: test-refresh-secret
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: testpass
+    command: >
+      sh -c "
+        npx node-pg-migrate up --migration-file-language ts --migrations-dir src/db/migrations &&
+        npm test
+      "
+    env_file: []
+
+  worker:
+    profiles:
+      - test-worker
+
+  client:
+    profiles:
+      - test-client
+
+  nginx:
+    profiles:
+      - test-nginx
