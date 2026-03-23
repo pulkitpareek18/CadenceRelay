@@ -18,7 +18,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 
-RUN mkdir -p /var/log/app && chown appuser:appgroup /var/log/app
+RUN mkdir -p /var/log/app /app/uploads && chown -R appuser:appgroup /var/log/app /app/uploads
 
 USER appuser
 
