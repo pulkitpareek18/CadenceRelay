@@ -78,13 +78,18 @@ export function startCampaignDispatchWorker(): Worker {
       const replyToResult = await pool.query("SELECT value FROM settings WHERE key = 'reply_to'");
       let replyTo: string | undefined;
       if (replyToResult.rows[0]?.value) {
-        try {
-          const parsed = JSON.parse(replyToResult.rows[0].value);
-          if (typeof parsed === 'string' && parsed.length > 0) {
-            replyTo = parsed;
+        const raw = replyToResult.rows[0].value;
+        if (typeof raw === 'string' && raw.length > 0 && raw.includes('@')) {
+          replyTo = raw;
+        } else if (typeof raw === 'string') {
+          try {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed === 'string' && parsed.length > 0) {
+              replyTo = parsed;
+            }
+          } catch {
+            // not JSON, skip
           }
-        } catch {
-          // not JSON or invalid, skip
         }
       }
 

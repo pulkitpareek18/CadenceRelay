@@ -248,13 +248,18 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
     const replyToResult = await pool.query("SELECT value FROM settings WHERE key = 'reply_to'");
     let replyTo: string | undefined;
     if (replyToResult.rows[0]?.value) {
-      try {
-        const parsed = JSON.parse(replyToResult.rows[0].value);
-        if (typeof parsed === 'string' && parsed.length > 0) {
-          replyTo = parsed;
-        }
-      } catch {
-        // not JSON or invalid, skip
+      const raw = replyToResult.rows[0].value;
+      // pg returns jsonb as already-parsed value — could be string directly or JSON-encoded string
+      if (typeof raw === 'string' && raw.length > 0 && raw.includes('@')) {
+        replyTo = raw;
+      } else if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed === 'string' && parsed.length > 0) {
+            replyTo = parsed;
+          }
+        } catch {
+          // not JSON, skip
       }
     }
 
