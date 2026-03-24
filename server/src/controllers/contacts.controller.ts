@@ -4,6 +4,8 @@ import { AppError } from '../middleware/errorHandler';
 import { parsePagination, buildPaginatedResult } from '../utils/pagination';
 import { verifyAdminPassword } from '../utils/adminAuth';
 import { cacheThrough, cacheDel } from '../utils/cache';
+import fs from 'fs';
+import readline from 'readline';
 
 // Validate UUID format to avoid Postgres "invalid input syntax for type uuid" 500 errors
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -367,9 +369,10 @@ const COLUMN_MAP: Record<string, string> = {
 };
 
 export async function importContactsCSV(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const filePath = req.file?.path;
   try {
     const file = req.file;
-    if (!file) {
+    if (!file || !filePath) {
       throw new AppError('CSV file required', 400);
     }
 
@@ -384,98 +387,50 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
       }
     }
 
-    const csvContent = file.buffer.toString('utf-8');
-    const lines = csvContent.split('\n').filter((line) => line.trim());
+    // --- Stream-based CSV import for large files (65MB+, 280K+ rows) ---
+    // Instead of loading the entire file into memory, we read line-by-line.
 
-    if (lines.length < 2) {
-      throw new AppError('CSV must have a header row and at least one data row', 400);
-    }
+    const rl = readline.createInterface({
+      input: fs.createReadStream(filePath, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    });
 
-    // Parse headers and build mapping
-    const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase().trim());
-    const mapping: Record<string, number> = {}; // db_column -> csv_index
-
-    for (let i = 0; i < headers.length; i++) {
-      const header = headers[i];
-      // If user provided custom mapping, use it; otherwise use auto-detect
-      if (columnMapping && columnMapping[header]) {
-        mapping[columnMapping[header]] = i;
-      } else if (COLUMN_MAP[header]) {
-        mapping[COLUMN_MAP[header]] = i;
-      }
-    }
-
-    if (mapping['email'] === undefined) {
-      throw new AppError('CSV must have an "email" column (or mapped equivalent)', 400);
-    }
-
+    let headers: string[] | null = null;
+    const mapping: Record<string, number> = {};
     let imported = 0;
     let skipped = 0;
     let duplicates = 0;
+    let totalRows = 0;
     const errors: string[] = [];
 
+    type ContactRow = {
+      email: string;
+      name: string | null;
+      state: string | null;
+      district: string | null;
+      block: string | null;
+      classes: string | null;
+      category: string | null;
+      management: string | null;
+      address: string | null;
+    };
+
     const BATCH_SIZE = 500;
-    const dataRows = lines.slice(1);
+    let batch: ContactRow[] = [];
 
-    // Process in batches
-    for (let batchStart = 0; batchStart < dataRows.length; batchStart += BATCH_SIZE) {
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, dataRows.length);
-      const batch = dataRows.slice(batchStart, batchEnd);
+    // Helper: flush a batch to the database
+    async function flushBatch(rows: ContactRow[]): Promise<void> {
+      if (rows.length === 0) return;
 
-      const validRows: {
-        email: string;
-        name: string | null;
-        state: string | null;
-        district: string | null;
-        block: string | null;
-        classes: string | null;
-        category: string | null;
-        management: string | null;
-        address: string | null;
-      }[] = [];
-
-      for (let i = 0; i < batch.length; i++) {
-        const lineNum = batchStart + i + 2; // 1-indexed, skip header
-        const cols = parseCSVLine(batch[i]);
-
-        const email = cols[mapping['email']]?.trim();
-        if (!email || !isValidEmail(email)) {
-          skipped++;
-          if (errors.length < 50) {
-            errors.push(`Row ${lineNum}: Invalid email "${email || ''}"`);
-          }
-          continue;
-        }
-
-        validRows.push({
-          email,
-          name: mapping['name'] !== undefined ? cols[mapping['name']]?.trim() || null : null,
-          state: mapping['state'] !== undefined ? cols[mapping['state']]?.trim() || null : null,
-          district: mapping['district'] !== undefined ? cols[mapping['district']]?.trim() || null : null,
-          block: mapping['block'] !== undefined ? cols[mapping['block']]?.trim() || null : null,
-          classes: mapping['classes'] !== undefined ? cols[mapping['classes']]?.trim() || null : null,
-          category: mapping['category'] !== undefined ? cols[mapping['category']]?.trim() || null : null,
-          management: mapping['management'] !== undefined ? cols[mapping['management']]?.trim() || null : null,
-          address: mapping['address'] !== undefined ? cols[mapping['address']]?.trim() || null : null,
-        });
-      }
-
-      if (validRows.length === 0) continue;
-
-      // Deduplicate within this batch — PostgreSQL ON CONFLICT can't handle
-      // the same email appearing twice in a single INSERT statement.
-      // Keep the last occurrence (later row wins).
+      // Deduplicate within batch (PostgreSQL ON CONFLICT can't handle same email twice)
       const seenEmails = new Map<string, number>();
-      for (let ri = 0; ri < validRows.length; ri++) {
-        seenEmails.set(validRows[ri].email.toLowerCase(), ri);
+      for (let ri = 0; ri < rows.length; ri++) {
+        seenEmails.set(rows[ri].email.toLowerCase(), ri);
       }
-      const uniqueRows = [...seenEmails.values()].map(idx => validRows[idx]);
-      const inBatchDupes = validRows.length - uniqueRows.length;
-      if (inBatchDupes > 0) {
-        duplicates += inBatchDupes;
-      }
+      const uniqueRows = [...seenEmails.values()].map(idx => rows[idx]);
+      const inBatchDupes = rows.length - uniqueRows.length;
+      if (inBatchDupes > 0) duplicates += inBatchDupes;
 
-      // Batch insert with ON CONFLICT
       const valuesPlaceholders: string[] = [];
       const queryParams: unknown[] = [];
       let paramIdx = 1;
@@ -484,17 +439,7 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
         valuesPlaceholders.push(
           `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`
         );
-        queryParams.push(
-          row.email,
-          row.name,
-          row.state,
-          row.district,
-          row.block,
-          row.classes,
-          row.category,
-          row.management,
-          row.address
-        );
+        queryParams.push(row.email, row.name, row.state, row.district, row.block, row.classes, row.category, row.management, row.address);
         paramIdx += 9;
       }
 
@@ -517,15 +462,11 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
 
       const newIds: string[] = [];
       for (const row of insertResult.rows) {
-        if (row.is_new) {
-          imported++;
-        } else {
-          duplicates++;
-        }
+        if (row.is_new) imported++;
+        else duplicates++;
         newIds.push(row.id);
       }
 
-      // If listId provided, add all contacts to the list
       if (listId && newIds.length > 0) {
         const listValues: string[] = [];
         const listParams: unknown[] = [];
@@ -540,6 +481,65 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
           listParams
         );
       }
+    }
+
+    // Process the file line by line
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (!headers) {
+        // First non-empty line = header row
+        headers = parseCSVLine(trimmed).map((h) => h.toLowerCase().trim());
+        for (let i = 0; i < headers.length; i++) {
+          const header = headers[i];
+          if (columnMapping && columnMapping[header]) {
+            mapping[columnMapping[header]] = i;
+          } else if (COLUMN_MAP[header]) {
+            mapping[COLUMN_MAP[header]] = i;
+          }
+        }
+        if (mapping['email'] === undefined) {
+          throw new AppError('CSV must have an "email" column (or mapped equivalent)', 400);
+        }
+        continue;
+      }
+
+      totalRows++;
+      const cols = parseCSVLine(trimmed);
+      const email = cols[mapping['email']]?.trim();
+
+      if (!email || !isValidEmail(email)) {
+        skipped++;
+        if (errors.length < 50) {
+          errors.push(`Row ${totalRows + 1}: Invalid email "${email || ''}"`);
+        }
+        continue;
+      }
+
+      batch.push({
+        email,
+        name: mapping['name'] !== undefined ? cols[mapping['name']]?.trim() || null : null,
+        state: mapping['state'] !== undefined ? cols[mapping['state']]?.trim() || null : null,
+        district: mapping['district'] !== undefined ? cols[mapping['district']]?.trim() || null : null,
+        block: mapping['block'] !== undefined ? cols[mapping['block']]?.trim() || null : null,
+        classes: mapping['classes'] !== undefined ? cols[mapping['classes']]?.trim() || null : null,
+        category: mapping['category'] !== undefined ? cols[mapping['category']]?.trim() || null : null,
+        management: mapping['management'] !== undefined ? cols[mapping['management']]?.trim() || null : null,
+        address: mapping['address'] !== undefined ? cols[mapping['address']]?.trim() || null : null,
+      });
+
+      if (batch.length >= BATCH_SIZE) {
+        await flushBatch(batch);
+        batch = [];
+      }
+    }
+
+    // Flush remaining rows
+    await flushBatch(batch);
+
+    if (!headers) {
+      throw new AppError('CSV must have a header row and at least one data row', 400);
     }
 
     // Update list count
@@ -557,25 +557,36 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
       imported,
       duplicates,
       skipped,
-      total: dataRows.length,
+      total: totalRows,
       errors: errors.slice(0, 20),
       detectedColumns: Object.keys(mapping),
     });
   } catch (err) {
     next(err);
+  } finally {
+    // Clean up the uploaded temp file
+    if (filePath) {
+      fs.unlink(filePath, () => {});
+    }
   }
 }
 
 // Preview CSV: returns headers and first N rows for column mapping UI
 export async function previewCSV(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const filePath = req.file?.path;
   try {
-    const file = req.file;
-    if (!file) {
+    if (!filePath) {
       throw new AppError('CSV file required', 400);
     }
 
-    const csvContent = file.buffer.toString('utf-8');
-    const lines = csvContent.split('\n').filter((line) => line.trim());
+    // Read only the first 64KB for preview (works for any file size)
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(64 * 1024);
+    const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+
+    const csvContent = buf.slice(0, bytesRead).toString('utf-8');
+    const lines = csvContent.split(/\r?\n/).filter((line) => line.trim());
 
     if (lines.length < 1) {
       throw new AppError('CSV file is empty', 400);
@@ -583,7 +594,6 @@ export async function previewCSV(req: Request, res: Response, next: NextFunction
 
     const headers = parseCSVLine(lines[0]).map((h) => h.trim());
 
-    // Auto-detect column mapping
     const autoMapping: Record<string, string> = {};
     for (const header of headers) {
       const lower = header.toLowerCase();
@@ -592,20 +602,27 @@ export async function previewCSV(req: Request, res: Response, next: NextFunction
       }
     }
 
-    // Get first 10 data rows
     const previewRows: string[][] = [];
     for (let i = 1; i < Math.min(lines.length, 11); i++) {
       previewRows.push(parseCSVLine(lines[i]));
     }
 
-    res.json({
-      headers,
-      autoMapping,
-      previewRows,
-      totalRows: lines.length - 1,
-    });
+    // Estimate total rows from file size
+    const stat = fs.statSync(filePath);
+    let totalRows: number;
+    if (stat.size <= 64 * 1024) {
+      totalRows = lines.length - 1;
+    } else {
+      const sampleBytes = Buffer.byteLength(lines.slice(0, 11).join('\n'), 'utf-8');
+      const avgBytesPerLine = sampleBytes / Math.min(lines.length, 11);
+      totalRows = Math.round(stat.size / avgBytesPerLine) - 1;
+    }
+
+    res.json({ headers, autoMapping, previewRows, totalRows });
   } catch (err) {
     next(err);
+  } finally {
+    if (filePath) fs.unlink(filePath, () => {});
   }
 }
 
@@ -618,7 +635,10 @@ export async function importContacts(req: Request, res: Response, next: NextFunc
     }
 
     const { listId } = req.body;
-    const csvContent = file.buffer.toString('utf-8');
+    // Support both disk storage (file.path) and memory storage (file.buffer)
+    const csvContent = file.path
+      ? fs.readFileSync(file.path, 'utf-8')
+      : (file.buffer as Buffer).toString('utf-8');
     const lines = csvContent.split('\n').filter((line) => line.trim());
 
     if (lines.length < 2) {

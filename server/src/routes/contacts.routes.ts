@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import {
   listContacts,
   getContact,
@@ -17,8 +19,16 @@ import { validateBody } from '../middleware/validateRequest';
 import { z } from 'zod';
 
 const router = Router();
-// Increase file size limit to 100MB for large school CSVs (280k+ rows)
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+
+// Use disk storage for large CSV files (up to 150MB) to avoid RAM pressure
+const uploadDir = path.join('/tmp', 'cadencerelay-uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const diskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+});
+const upload = multer({ storage: diskStorage, limits: { fileSize: 150 * 1024 * 1024 } });
 
 const createSchema = z.object({
   email: z.string().email(),
