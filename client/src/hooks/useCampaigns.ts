@@ -12,12 +12,13 @@ import {
   scheduleCampaign,
 } from '../api/campaigns.api';
 
-export function useCampaignsList(params: { page: number; limit?: number; status?: string }) {
+export function useCampaignsList(params: { page: number; limit?: number; status?: string; search?: string }) {
   const queryParams: Record<string, string> = {
     page: String(params.page),
     limit: String(params.limit || 20),
   };
   if (params.status) queryParams.status = params.status;
+  if (params.search) queryParams.search = params.search;
 
   return useQuery({
     queryKey: ['campaigns', queryParams],

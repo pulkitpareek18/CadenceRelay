@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { getContact, Contact } from '../api/contacts.api';
+import { getContact, updateContact, Contact } from '../api/contacts.api';
 
 interface SendHistoryItem {
   campaign_id: string;
@@ -18,9 +18,14 @@ export default function ContactDetail() {
   const [contact, setContact] = useState<Contact | null>(null);
   const [history, setHistory] = useState<SendHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editStatus, setEditStatus] = useState('');
+  const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
+  function loadContact() {
     if (!id) return;
     getContact(id)
       .then((res) => {
@@ -29,7 +34,32 @@ export default function ContactDetail() {
       })
       .catch(() => toast.error('Failed to load contact'))
       .finally(() => setLoading(false));
-  }, [id]);
+  }
+
+  useEffect(() => { loadContact(); }, [id]);
+
+  function openEditModal() {
+    if (!contact) return;
+    setEditName(contact.name || '');
+    setEditEmail(contact.email);
+    setEditStatus(contact.status);
+    setShowEditModal(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!id || !editEmail.trim()) return;
+    setSaving(true);
+    try {
+      await updateContact(id, { email: editEmail, name: editName || null, status: editStatus } as Partial<Contact>);
+      toast.success('Contact updated');
+      setShowEditModal(false);
+      loadContact();
+    } catch {
+      toast.error('Failed to update contact');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (loading) return <div className="flex h-64 items-center justify-center text-gray-500">Loading...</div>;
   if (!contact) return <div className="p-6 text-gray-500">Contact not found</div>;
@@ -40,8 +70,18 @@ export default function ContactDetail() {
 
       {/* Basic Info */}
       <div className="rounded-xl bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold">{contact.name || contact.email}</h1>
-        <p className="text-gray-500">{contact.email}</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">{contact.name || contact.email}</h1>
+            <p className="text-gray-500">{contact.email}</p>
+          </div>
+          <button
+            onClick={openEditModal}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Edit
+          </button>
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <span className="text-sm text-gray-500">Status</span>
@@ -163,6 +203,64 @@ export default function ContactDetail() {
           </div>
         )}
       </div>
+
+      {/* Edit Contact Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white p-6">
+            <h3 className="text-lg font-semibold">Edit Contact</h3>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Email</label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                >
+                  <option value="active">Active</option>
+                  <option value="bounced">Bounced</option>
+                  <option value="complained">Complained</option>
+                  <option value="unsubscribed">Unsubscribed</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setShowEditModal(false)}
+                disabled={saving}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={saving || !editEmail.trim()}
+                className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

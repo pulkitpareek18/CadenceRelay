@@ -13,10 +13,21 @@ function validateUUID(id: string, label = 'ID'): void {
   }
 }
 
+// Safe column mapping for sorting — prevents SQL injection
+const SORT_COLUMN_MAP: Record<string, string> = {
+  email: 'c.email',
+  name: 'c.name',
+  status: 'c.status',
+  send_count: 'c.send_count',
+  created_at: 'c.created_at',
+  state: 'c.state',
+  district: 'c.district',
+};
+
 export async function listContacts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { page, limit, offset } = parsePagination(req.query as { page?: string; limit?: string });
-    const { search, status, listId, minSendCount, maxSendCount, state, district, block, category, management } = req.query;
+    const { search, status, listId, minSendCount, maxSendCount, state, district, block, category, management, sortBy, sortDir } = req.query;
 
     let whereClause = 'WHERE 1=1';
     const params: unknown[] = [];
@@ -84,6 +95,10 @@ export async function listContacts(req: Request, res: Response, next: NextFuncti
     );
     const total = parseInt(countResult.rows[0].count);
 
+    // Determine sort order from query params with safe column whitelist
+    const sortColumn = (typeof sortBy === 'string' && SORT_COLUMN_MAP[sortBy]) ? SORT_COLUMN_MAP[sortBy] : 'c.created_at';
+    const sortDirection = (typeof sortDir === 'string' && sortDir.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
     const dataResult = await pool.query(
       `SELECT c.*,
         COALESCE(
@@ -93,7 +108,7 @@ export async function listContacts(req: Request, res: Response, next: NextFuncti
            WHERE clm.contact_id = c.id), '[]'
         ) as lists
        FROM contacts c ${whereClause}
-       ORDER BY c.created_at DESC
+       ORDER BY ${sortColumn} ${sortDirection}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset]
     );

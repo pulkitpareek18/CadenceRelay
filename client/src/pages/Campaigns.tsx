@@ -17,6 +17,7 @@ const statusColors: Record<string, string> = {
 
 function CampaignsContent() {
   const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteModal, setDeleteModal] = useState<{ type: 'single' | 'bulk'; id?: string } | null>(null);
@@ -25,6 +26,7 @@ function CampaignsContent() {
   const { data, isLoading, isError } = useCampaignsList({
     page,
     status: statusFilter || undefined,
+    search: search || undefined,
   });
 
   const deleteMutation = useDeleteCampaign();
@@ -34,8 +36,8 @@ function CampaignsContent() {
   const total = data?.pagination?.total || 0;
   const totalPages = Math.ceil(total / 20);
 
-  // Clear selection when page/filter changes
-  useEffect(() => { setSelectedIds(new Set()); }, [page, statusFilter]);
+  // Clear selection when page/filter/search changes
+  useEffect(() => { setSelectedIds(new Set()); }, [page, statusFilter, search]);
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -87,7 +89,14 @@ function CampaignsContent() {
         </div>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <input
+          type="text"
+          placeholder="Search campaigns..."
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          className="rounded-lg border px-3 py-2 text-sm w-64"
+        />
         <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="rounded-lg border px-3 py-2 text-sm">
           <option value="">All Status</option>
           <option value="draft">Draft</option>

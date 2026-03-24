@@ -18,6 +18,8 @@ export interface ContactsParams {
   block?: string;
   category?: string;
   management?: string;
+  sortBy?: string;
+  sortDir?: string;
 }
 
 export function useContactsList(params: ContactsParams) {
@@ -33,6 +35,8 @@ export function useContactsList(params: ContactsParams) {
   if (params.block) queryParams.block = params.block;
   if (params.category) queryParams.category = params.category;
   if (params.management) queryParams.management = params.management;
+  if (params.sortBy) queryParams.sortBy = params.sortBy;
+  if (params.sortDir) queryParams.sortDir = params.sortDir;
 
   return useQuery({
     queryKey: ['contacts', queryParams],

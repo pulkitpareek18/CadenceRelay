@@ -24,7 +24,7 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 export async function listCampaigns(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { page, limit, offset } = parsePagination(req.query as { page?: string; limit?: string });
-    const { status } = req.query;
+    const { status, search } = req.query;
 
     let whereClause = 'WHERE 1=1';
     const params: unknown[] = [];
@@ -33,6 +33,12 @@ export async function listCampaigns(req: Request, res: Response, next: NextFunct
     if (status) {
       whereClause += ` AND c.status = $${idx}`;
       params.push(status);
+      idx++;
+    }
+
+    if (search) {
+      whereClause += ` AND c.name ILIKE $${idx}`;
+      params.push(`%${search}%`);
       idx++;
     }
 

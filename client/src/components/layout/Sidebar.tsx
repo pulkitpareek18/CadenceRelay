@@ -8,6 +8,7 @@ import {
   ChartBarIcon,
   Cog6ToothIcon,
   ArrowUpTrayIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 
 const navigation = [
@@ -21,11 +22,23 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export default function Sidebar({ onClose }: SidebarProps) {
   return (
     <div className="flex h-full w-64 flex-col bg-gray-900">
-      <div className="flex h-16 items-center px-6">
+      <div className="flex h-16 items-center justify-between px-6">
         <h1 className="text-xl font-bold text-white">CadenceRelay</h1>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1 text-gray-400 hover:bg-gray-800 hover:text-white lg:hidden"
+          >
+            <XMarkIcon className="h-5 w-5" />
+          </button>
+        )}
       </div>
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navigation.map((item) => (
@@ -33,6 +46,7 @@ export default function Sidebar() {
             key={item.name}
             to={item.href}
             end={item.href === '/'}
+            onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 isActive
