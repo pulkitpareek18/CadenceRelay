@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { pool } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { cacheThrough, cacheDel } from '../utils/cache';
+import { encryptCredential, decryptCredential, isEncrypted } from '../utils/crypto';
 
 // FIX: Mask sensitive fields so credentials are never returned in plaintext
 const SENSITIVE_KEYS = ['pass', 'password', 'secretAccessKey', 'secret', 'accessKeyId'];
@@ -89,13 +90,16 @@ export async function updateProvider(req: Request, res: Response, next: NextFunc
 export async function updateGmailConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { host, port, user, pass } = req.body;
-    const config = { host: host || 'smtp.gmail.com', port: port || 587, user, pass };
+    // Encrypt password at rest
+    const encryptedPass = pass ? encryptCredential(pass) : '';
+    const config = { host: host || 'smtp.gmail.com', port: port || 587, user, pass: encryptedPass };
 
     await pool.query(
       'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2',
       [JSON.stringify(config), 'gmail_config']
     );
 
+    await cacheDel('settings');
     res.json({ message: 'Gmail config updated' });
   } catch (err) {
     next(err);
@@ -105,13 +109,17 @@ export async function updateGmailConfig(req: Request, res: Response, next: NextF
 export async function updateSesConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { region, accessKeyId, secretAccessKey, fromEmail } = req.body;
-    const config = { region, accessKeyId, secretAccessKey, fromEmail };
+    // Encrypt secret keys at rest
+    const encryptedAccessKey = accessKeyId ? encryptCredential(accessKeyId) : '';
+    const encryptedSecret = secretAccessKey ? encryptCredential(secretAccessKey) : '';
+    const config = { region, accessKeyId: encryptedAccessKey, secretAccessKey: encryptedSecret, fromEmail };
 
     await pool.query(
       'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2',
       [JSON.stringify(config), 'ses_config']
     );
 
+    await cacheDel('settings');
     res.json({ message: 'SES config updated' });
   } catch (err) {
     next(err);
@@ -128,6 +136,7 @@ export async function updateThrottleDefaults(req: Request, res: Response, next: 
       [JSON.stringify(config), 'throttle_defaults']
     );
 
+    await cacheDel('settings');
     res.json({ message: 'Throttle defaults updated' });
   } catch (err) {
     next(err);
@@ -153,6 +162,7 @@ export async function updateReplyTo(req: Request, res: Response, next: NextFunct
       );
     }
 
+    await cacheDel('settings');
     res.json({ message: 'Reply-To updated', replyTo: value });
   } catch (err) {
     next(err);
