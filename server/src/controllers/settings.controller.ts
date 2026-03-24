@@ -260,6 +260,7 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
           }
         } catch {
           // not JSON, skip
+        }
       }
     }
 
