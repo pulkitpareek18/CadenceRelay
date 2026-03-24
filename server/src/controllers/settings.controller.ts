@@ -45,13 +45,15 @@ export async function getSettings(_req: Request, res: Response, next: NextFuncti
       const result = await pool.query('SELECT key, value FROM settings ORDER BY key');
       const s: Record<string, unknown> = {};
       for (const row of result.rows) {
-        // FIX: Mask sensitive fields before returning
         let value = row.value;
-        if (typeof value === 'string') {
+        // pg returns jsonb as object, varchar/text as string
+        if (typeof value === 'object' && value !== null) {
+          value = maskSensitiveValues(value);
+        } else if (typeof value === 'string') {
           try {
             const parsed = JSON.parse(value);
             if (typeof parsed === 'object' && parsed !== null) {
-              value = JSON.stringify(maskSensitiveValues(parsed));
+              value = maskSensitiveValues(parsed);
             }
           } catch {
             // not JSON, keep as-is

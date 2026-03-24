@@ -43,12 +43,23 @@ function SettingsContent() {
   const updateThrottleMutation = useUpdateThrottleDefaults();
   const updateReplyToMutation = useUpdateReplyTo();
 
-  // Populate form when settings load
+  // Populate form when settings load — replace masked values with empty string + placeholder
   useEffect(() => {
     if (settingsData) {
       if (settingsData.email_provider) setProvider(settingsData.email_provider);
-      if (settingsData.gmail_config) setGmail(settingsData.gmail_config);
-      if (settingsData.ses_config) setSes(settingsData.ses_config);
+      if (settingsData.gmail_config) {
+        const gc = { ...settingsData.gmail_config };
+        // If pass is masked, show empty — user must re-enter to change
+        if (typeof gc.pass === 'string' && gc.pass.startsWith('****')) gc.pass = '';
+        setGmail(gc);
+      }
+      if (settingsData.ses_config) {
+        const sc = { ...settingsData.ses_config };
+        // If keys are masked, show empty — user must re-enter to change
+        if (typeof sc.accessKeyId === 'string' && sc.accessKeyId.startsWith('****')) sc.accessKeyId = '';
+        if (typeof sc.secretAccessKey === 'string' && sc.secretAccessKey.startsWith('****')) sc.secretAccessKey = '';
+        setSes(sc);
+      }
       if (settingsData.throttle_defaults) setThrottle(settingsData.throttle_defaults);
       if (settingsData.reply_to) setReplyTo(settingsData.reply_to);
     }
@@ -64,7 +75,8 @@ function SettingsContent() {
     if (!gmail.host.trim()) errors.host = 'SMTP host is required';
     if (!gmail.port || gmail.port <= 0) errors.port = 'Valid port is required';
     if (!gmail.user.trim()) errors.user = 'Gmail address is required';
-    if (!gmail.pass.trim()) errors.pass = 'App password is required';
+    const hasSavedPass = settingsData?.gmail_config?.pass;
+    if (!gmail.pass.trim() && !hasSavedPass) errors.pass = 'App password is required';
     setGmailErrors(errors);
     return Object.keys(errors).length === 0;
   }
@@ -73,8 +85,10 @@ function SettingsContent() {
     const errors: Record<string, string> = {};
     if (!ses.region.trim()) errors.region = 'AWS Region is required';
     if (!ses.fromEmail.trim()) errors.fromEmail = 'From email is required';
-    if (!ses.accessKeyId.trim()) errors.accessKeyId = 'Access Key ID is required';
-    if (!ses.secretAccessKey.trim()) errors.secretAccessKey = 'Secret Access Key is required';
+    // Keys are only required if not already saved (placeholder shows "saved" state)
+    const hasSavedKeys = settingsData?.ses_config?.accessKeyId;
+    if (!ses.accessKeyId.trim() && !hasSavedKeys) errors.accessKeyId = 'Access Key ID is required';
+    if (!ses.secretAccessKey.trim() && !hasSavedKeys) errors.secretAccessKey = 'Secret Access Key is required';
     setSesErrors(errors);
     return Object.keys(errors).length === 0;
   }
@@ -236,7 +250,7 @@ function SettingsContent() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">App Password *</label>
-              <input type="password" value={gmail.pass} onChange={(e) => { setGmail({ ...gmail, pass: e.target.value }); setGmailErrors((p) => ({ ...p, pass: '' })); }} className={inputClass(gmailErrors.pass)} />
+              <input type="password" placeholder={settingsData?.gmail_config?.pass ? '••••••• (saved — leave blank to keep)' : 'Enter app password'} value={gmail.pass} onChange={(e) => { setGmail({ ...gmail, pass: e.target.value }); setGmailErrors((p) => ({ ...p, pass: '' })); }} className={inputClass(gmailErrors.pass)} />
               {gmailErrors.pass && <p className="mt-1 text-xs text-red-500">{gmailErrors.pass}</p>}
             </div>
           </div>
@@ -271,12 +285,12 @@ function SettingsContent() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Access Key ID *</label>
-              <input type="text" value={ses.accessKeyId} onChange={(e) => { setSes({ ...ses, accessKeyId: e.target.value }); setSesErrors((p) => ({ ...p, accessKeyId: '' })); }} className={inputClass(sesErrors.accessKeyId)} />
+              <input type="password" placeholder={settingsData?.ses_config?.accessKeyId ? '••••••• (saved — leave blank to keep)' : 'AKIA...'} value={ses.accessKeyId} onChange={(e) => { setSes({ ...ses, accessKeyId: e.target.value }); setSesErrors((p) => ({ ...p, accessKeyId: '' })); }} className={inputClass(sesErrors.accessKeyId)} />
               {sesErrors.accessKeyId && <p className="mt-1 text-xs text-red-500">{sesErrors.accessKeyId}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Secret Access Key *</label>
-              <input type="password" value={ses.secretAccessKey} onChange={(e) => { setSes({ ...ses, secretAccessKey: e.target.value }); setSesErrors((p) => ({ ...p, secretAccessKey: '' })); }} className={inputClass(sesErrors.secretAccessKey)} />
+              <input type="password" placeholder={settingsData?.ses_config?.secretAccessKey ? '••••••• (saved — leave blank to keep)' : 'Enter secret key'} value={ses.secretAccessKey} onChange={(e) => { setSes({ ...ses, secretAccessKey: e.target.value }); setSesErrors((p) => ({ ...p, secretAccessKey: '' })); }} className={inputClass(sesErrors.secretAccessKey)} />
               {sesErrors.secretAccessKey && <p className="mt-1 text-xs text-red-500">{sesErrors.secretAccessKey}</p>}
             </div>
           </div>
