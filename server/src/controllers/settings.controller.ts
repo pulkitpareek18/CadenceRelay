@@ -90,9 +90,23 @@ export async function updateProvider(req: Request, res: Response, next: NextFunc
 export async function updateGmailConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { host, port, user, pass } = req.body;
-    // Encrypt password at rest
-    const encryptedPass = pass ? encryptCredential(pass) : '';
-    const config = { host: host || 'smtp.gmail.com', port: port || 587, user, pass: encryptedPass };
+
+    // Load existing config to preserve unchanged encrypted password
+    const existingResult = await pool.query("SELECT value FROM settings WHERE key = 'gmail_config'");
+    let existingConfig: Record<string, string> = {};
+    if (existingResult.rows[0]?.value) {
+      existingConfig = typeof existingResult.rows[0].value === 'string'
+        ? JSON.parse(existingResult.rows[0].value)
+        : existingResult.rows[0].value;
+    }
+
+    // Only encrypt NEW password — if masked (****), keep existing encrypted value
+    const isMasked = (val: string) => val && val.startsWith('****');
+    const finalPass = !pass || isMasked(pass)
+      ? existingConfig.pass || ''
+      : encryptCredential(pass);
+
+    const config = { host: host || 'smtp.gmail.com', port: port || 587, user, pass: finalPass };
 
     await pool.query(
       'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2',
@@ -109,10 +123,28 @@ export async function updateGmailConfig(req: Request, res: Response, next: NextF
 export async function updateSesConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { region, accessKeyId, secretAccessKey, fromEmail } = req.body;
-    // Encrypt secret keys at rest
-    const encryptedAccessKey = accessKeyId ? encryptCredential(accessKeyId) : '';
-    const encryptedSecret = secretAccessKey ? encryptCredential(secretAccessKey) : '';
-    const config = { region, accessKeyId: encryptedAccessKey, secretAccessKey: encryptedSecret, fromEmail };
+
+    // Load existing config to preserve unchanged encrypted fields
+    const existingResult = await pool.query("SELECT value FROM settings WHERE key = 'ses_config'");
+    let existingConfig: Record<string, string> = {};
+    if (existingResult.rows[0]?.value) {
+      existingConfig = typeof existingResult.rows[0].value === 'string'
+        ? JSON.parse(existingResult.rows[0].value)
+        : existingResult.rows[0].value;
+    }
+
+    // Only encrypt NEW values — if user didn't change the field (masked value starts with ****), keep existing encrypted value
+    const isMasked = (val: string) => val && val.startsWith('****');
+
+    const finalAccessKeyId = !accessKeyId || isMasked(accessKeyId)
+      ? existingConfig.accessKeyId || ''
+      : encryptCredential(accessKeyId);
+
+    const finalSecretAccessKey = !secretAccessKey || isMasked(secretAccessKey)
+      ? existingConfig.secretAccessKey || ''
+      : encryptCredential(secretAccessKey);
+
+    const config = { region, accessKeyId: finalAccessKeyId, secretAccessKey: finalSecretAccessKey, fromEmail };
 
     await pool.query(
       'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2',

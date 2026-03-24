@@ -9,11 +9,15 @@ import { decryptCredential, isEncrypted } from '../../utils/crypto';
  */
 function maybeDecrypt(value: string): string {
   if (!value) return value;
-  if (isEncrypted(value)) {
-    const decrypted = decryptCredential(value);
-    if (decrypted !== null) return decrypted;
+  // Decrypt iteratively — handles double-encryption from masked-value bug
+  let current = value;
+  for (let i = 0; i < 5; i++) { // max 5 layers of encryption
+    if (!isEncrypted(current)) break;
+    const decrypted = decryptCredential(current);
+    if (decrypted === null) break; // decryption failed, return what we have
+    current = decrypted;
   }
-  return value; // not encrypted or decryption failed, return as-is
+  return current;
 }
 
 export function createProvider(provider: string, config: Record<string, unknown>): EmailProvider {
