@@ -50,7 +50,7 @@ export function useContactsList(params: ContactsParams) {
 export function useCreateContact() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { email: string; name?: string; listIds?: string[] }) =>
+    mutationFn: (data: { email: string; name?: string; state?: string; district?: string; block?: string; classes?: string; category?: string; management?: string; address?: string; metadata?: Record<string, unknown>; listIds?: string[] }) =>
       createContact(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
