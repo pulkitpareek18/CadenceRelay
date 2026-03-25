@@ -29,6 +29,7 @@ const sesSchema = z.object({
   accessKeyId: z.string().default(''),
   secretAccessKey: z.string().default(''),
   fromEmail: z.string().email(),
+  fromName: z.string().optional().default(''),
 });
 
 const throttleSchema = z.object({
