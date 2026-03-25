@@ -151,7 +151,7 @@ export function startCampaignDispatchWorker(): Worker {
         }
 
         contactsResult = await pool.query(
-          `SELECT c.id, c.email, c.name FROM contacts c
+          `SELECT c.id, c.email, c.name, c.state, c.district, c.block, c.classes, c.category, c.management, c.address, c.metadata FROM contacts c
            WHERE c.status = 'active' ${filterWhere}
            AND c.id NOT IN (SELECT contact_id FROM campaign_recipients WHERE campaign_id = $${paramIndex} AND contact_id IS NOT NULL)`,
           [...filterParams, campaignId]
@@ -159,7 +159,7 @@ export function startCampaignDispatchWorker(): Worker {
       } else {
         // Regular list: use contact_list_members join
         contactsResult = await pool.query(
-          `SELECT c.id, c.email, c.name FROM contacts c
+          `SELECT c.id, c.email, c.name, c.state, c.district, c.block, c.classes, c.category, c.management, c.address, c.metadata FROM contacts c
            JOIN contact_list_members clm ON clm.contact_id = c.id
            WHERE clm.list_id = $1 AND c.status = 'active'
            AND c.id NOT IN (SELECT contact_id FROM campaign_recipients WHERE campaign_id = $2 AND contact_id IS NOT NULL)`,
@@ -180,12 +180,27 @@ export function startCampaignDispatchWorker(): Worker {
       for (const contact of contacts) {
         const trackingToken = generateTrackingToken();
 
-        // Render template for this contact
+        // Render template for this contact — all standard fields + custom metadata
         const variables: Record<string, string> = {
           school_name: contact.name || '',
           name: contact.name || '',
           email: contact.email,
+          state: contact.state || '',
+          district: contact.district || '',
+          block: contact.block || '',
+          classes: contact.classes || '',
+          category: contact.category || '',
+          management: contact.management || '',
+          address: contact.address || '',
         };
+        // Merge custom metadata keys (e.g. principal_name, phone, etc.)
+        if (contact.metadata && typeof contact.metadata === 'object') {
+          for (const [key, val] of Object.entries(contact.metadata)) {
+            if (typeof val === 'string' || typeof val === 'number') {
+              variables[key] = String(val);
+            }
+          }
+        }
         const renderedHtml = renderTemplate(template.html_body, variables);
         const renderedSubject = renderTemplate(template.subject, variables);
         const renderedText = template.text_body ? renderTemplate(template.text_body, variables) : null;
