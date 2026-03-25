@@ -1,13 +1,14 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { previewCSV, importContactsCSVTracked, CSVPreviewResult, CSVImportResult } from '../api/contacts.api';
 import { ContactList } from '../api/lists.api';
 import { useListsList } from '../hooks/useLists';
+import { useCustomVariables } from '../hooks/useCustomVariables';
 import ErrorBoundary from '../components/ErrorBoundary';
 import UploadProgress, { FileUploadProgress } from '../components/ui/UploadProgress';
 import { UploadState, INITIAL_UPLOAD_STATE } from '../lib/uploadHelper';
 
-const DB_COLUMNS = [
+const STANDARD_DB_COLUMNS = [
   { value: '', label: '-- Skip --' },
   { value: 'email', label: 'Email' },
   { value: 'name', label: 'Name / School Name' },
@@ -33,6 +34,16 @@ function ImportContent() {
   const abortRef = useRef<(() => void) | null>(null);
 
   const { data: lists = [] } = useListsList();
+  const { data: customVariables = [] } = useCustomVariables();
+
+  // Build column options: standard + custom variables
+  const DB_COLUMNS = useMemo(() => {
+    const cols = [...STANDARD_DB_COLUMNS];
+    for (const cv of customVariables) {
+      cols.push({ value: cv.key, label: `${cv.name} (custom)` });
+    }
+    return cols;
+  }, [customVariables]);
 
   const handleFile = useCallback(async (f: File) => {
     if (!f.name.endsWith('.csv')) {

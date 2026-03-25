@@ -8,6 +8,7 @@ import templatesRoutes from './templates.routes';
 import campaignsRoutes from './campaigns.routes';
 import analyticsRoutes from './analytics.routes';
 import adminRoutes from './admin.routes';
+import customVariablesRoutes from './customVariables.routes';
 import trackingRoutes from './tracking.routes';
 import webhookRoutes from './webhooks.routes';
 import sseRoutes from './sse.routes';
@@ -33,6 +34,7 @@ router.use('/lists', authenticate, listsRoutes);
 router.use('/templates', authenticate, templatesRoutes);
 router.use('/campaigns', authenticate, campaignsRoutes);
 router.use('/admin', authenticate, adminRoutes);
+router.use('/custom-variables', authenticate, customVariablesRoutes);
 
 // Public routes
 router.use('/t', trackingRoutes);

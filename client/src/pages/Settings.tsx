@@ -12,6 +12,14 @@ import {
   useUpdateThrottleDefaults,
   useUpdateReplyTo,
 } from '../hooks/useSettings';
+import {
+  useCustomVariables,
+  useCreateCustomVariable,
+  useUpdateCustomVariable,
+  useDeleteCustomVariable,
+  useReorderCustomVariables,
+} from '../hooks/useCustomVariables';
+import { CustomVariable } from '../api/customVariables.api';
 import { FormSkeleton } from '../components/ui/Skeleton';
 import ErrorBoundary from '../components/ErrorBoundary';
 import AdminPasswordModal from '../components/ui/AdminPasswordModal';
@@ -36,6 +44,63 @@ function SettingsContent() {
   const [sesErrors, setSesErrors] = useState<Record<string, string>>({});
 
   const [clearHistoryModal, setClearHistoryModal] = useState<'campaigns' | 'contacts' | 'all' | null>(null);
+
+  // Custom Variables state
+  const { data: customVariables = [], isLoading: cvLoading } = useCustomVariables();
+  const createCVMutation = useCreateCustomVariable();
+  const updateCVMutation = useUpdateCustomVariable();
+  const deleteCVMutation = useDeleteCustomVariable();
+  const reorderCVMutation = useReorderCustomVariables();
+  const [showCVForm, setShowCVForm] = useState(false);
+  const [editingCV, setEditingCV] = useState<CustomVariable | null>(null);
+  const [cvForm, setCVForm] = useState({ name: '', type: 'text' as CustomVariable['type'], options: '' as string, required: false, default_value: '' });
+
+  function resetCVForm() {
+    setCVForm({ name: '', type: 'text', options: '', required: false, default_value: '' });
+    setEditingCV(null);
+    setShowCVForm(false);
+  }
+
+  function openEditCV(cv: CustomVariable) {
+    setEditingCV(cv);
+    setCVForm({
+      name: cv.name,
+      type: cv.type,
+      options: cv.options.join(', '),
+      required: cv.required,
+      default_value: cv.default_value || '',
+    });
+    setShowCVForm(true);
+  }
+
+  async function handleSaveCV(e: FormEvent) {
+    e.preventDefault();
+    if (!cvForm.name.trim()) return;
+    const payload = {
+      name: cvForm.name,
+      type: cvForm.type,
+      options: cvForm.type === 'select' ? cvForm.options.split(',').map(o => o.trim()).filter(Boolean) : [],
+      required: cvForm.required,
+      default_value: cvForm.default_value || null,
+    };
+    if (editingCV) {
+      await updateCVMutation.mutateAsync({ id: editingCV.id, data: payload });
+    } else {
+      await createCVMutation.mutateAsync(payload);
+    }
+    resetCVForm();
+  }
+
+  function handleMoveCV(idx: number, direction: 'up' | 'down') {
+    const vars = [...customVariables];
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= vars.length) return;
+    const order = vars.map((v, i) => ({
+      id: v.id,
+      sort_order: i === idx ? swapIdx : i === swapIdx ? idx : i,
+    }));
+    reorderCVMutation.mutate(order);
+  }
 
   const updateProviderMutation = useUpdateProvider();
   const updateGmailMutation = useUpdateGmailConfig();
@@ -396,6 +461,180 @@ function SettingsContent() {
           </button>
         </div>
       </form>
+
+      {/* Custom Variables */}
+      <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Custom Variables</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Define custom template variables (e.g. principal_name, phone). These appear in contact forms, CSV import, and as {'{{key}}'} in templates.
+            </p>
+          </div>
+          <button
+            onClick={() => { resetCVForm(); setShowCVForm(true); }}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700"
+          >
+            Add Variable
+          </button>
+        </div>
+
+        {/* Variable Form */}
+        {showCVForm && (
+          <form onSubmit={handleSaveCV} className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Display Name *</label>
+                <input
+                  type="text"
+                  value={cvForm.name}
+                  onChange={(e) => setCVForm({ ...cvForm, name: e.target.value })}
+                  placeholder="e.g. Principal Name"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Type</label>
+                <select
+                  value={cvForm.type}
+                  onChange={(e) => setCVForm({ ...cvForm, type: e.target.value as CustomVariable['type'] })}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                >
+                  <option value="text">Text</option>
+                  <option value="number">Number</option>
+                  <option value="date">Date</option>
+                  <option value="select">Select (dropdown)</option>
+                </select>
+              </div>
+              {cvForm.type === 'select' && (
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">Options (comma-separated)</label>
+                  <input
+                    type="text"
+                    value={cvForm.options}
+                    onChange={(e) => setCVForm({ ...cvForm, options: e.target.value })}
+                    placeholder="Option A, Option B, Option C"
+                    className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Default Value</label>
+                <input
+                  type="text"
+                  value={cvForm.default_value}
+                  onChange={(e) => setCVForm({ ...cvForm, default_value: e.target.value })}
+                  placeholder="Optional"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={cvForm.required}
+                    onChange={(e) => setCVForm({ ...cvForm, required: e.target.checked })}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  Required field
+                </label>
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="submit"
+                disabled={createCVMutation.isPending || updateCVMutation.isPending}
+                className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {editingCV ? 'Update Variable' : 'Create Variable'}
+              </button>
+              <button
+                type="button"
+                onClick={resetCVForm}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Variables List */}
+        {cvLoading ? (
+          <div className="mt-4 text-sm text-gray-400">Loading variables...</div>
+        ) : customVariables.length === 0 ? (
+          <div className="mt-4 rounded-lg border-2 border-dashed border-gray-200 p-6 text-center">
+            <p className="text-sm text-gray-500">No custom variables defined yet.</p>
+            <p className="mt-1 text-xs text-gray-400">Custom variables let you store extra data per contact and use it in email templates.</p>
+          </div>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Order</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Name</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Key</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Required</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {customVariables.map((cv, idx) => (
+                  <tr key={cv.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleMoveCV(idx, 'up')}
+                          disabled={idx === 0}
+                          className="text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                          title="Move up"
+                        >
+                          &#9650;
+                        </button>
+                        <button
+                          onClick={() => handleMoveCV(idx, 'down')}
+                          disabled={idx === customVariables.length - 1}
+                          className="text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                          title="Move down"
+                        >
+                          &#9660;
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 font-medium text-gray-900">{cv.name}</td>
+                    <td className="px-3 py-2">
+                      <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-600">{`{{${cv.key}}}`}</code>
+                    </td>
+                    <td className="px-3 py-2 capitalize text-gray-600">{cv.type}</td>
+                    <td className="px-3 py-2">{cv.required ? 'Yes' : 'No'}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        onClick={() => openEditCV(cv)}
+                        className="mr-2 text-primary-600 hover:text-primary-800"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete variable "${cv.name}"?`)) {
+                            deleteCVMutation.mutate(cv.id);
+                          }
+                        }}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Clear History / Danger Zone */}
       <div className="mt-10 rounded-xl border-2 border-red-200 bg-red-50 p-6">

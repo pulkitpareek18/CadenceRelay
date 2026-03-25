@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { getContact, updateContact, Contact } from '../api/contacts.api';
+import { useCustomVariables } from '../hooks/useCustomVariables';
 
 interface SendHistoryItem {
   campaign_id: string;
@@ -22,8 +23,10 @@ export default function ContactDetail() {
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editStatus, setEditStatus] = useState('');
+  const [editMetadata, setEditMetadata] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
+  const { data: customVariables = [] } = useCustomVariables();
 
   function loadContact() {
     if (!id) return;
@@ -43,6 +46,12 @@ export default function ContactDetail() {
     setEditName(contact.name || '');
     setEditEmail(contact.email);
     setEditStatus(contact.status);
+    // Populate metadata values from contact
+    const meta: Record<string, string> = {};
+    for (const cv of customVariables) {
+      meta[cv.key] = (contact.metadata?.[cv.key] as string) || '';
+    }
+    setEditMetadata(meta);
     setShowEditModal(true);
   }
 
@@ -50,7 +59,18 @@ export default function ContactDetail() {
     if (!id || !editEmail.trim()) return;
     setSaving(true);
     try {
-      await updateContact(id, { email: editEmail, name: editName || null, status: editStatus } as Partial<Contact>);
+      // Merge existing metadata with custom variable edits
+      const mergedMetadata = { ...(contact?.metadata || {}), ...editMetadata };
+      // Remove empty values
+      for (const key of Object.keys(mergedMetadata)) {
+        if (mergedMetadata[key] === '') delete mergedMetadata[key];
+      }
+      await updateContact(id, {
+        email: editEmail,
+        name: editName || null,
+        status: editStatus,
+        metadata: mergedMetadata,
+      } as Partial<Contact>);
       toast.success('Contact updated');
       setShowEditModal(false);
       loadContact();
@@ -153,6 +173,25 @@ export default function ContactDetail() {
         </div>
       )}
 
+      {/* Custom Variables Data */}
+      {customVariables.length > 0 && customVariables.some(cv => contact.metadata?.[cv.key]) && (
+        <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">Custom Data</h2>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {customVariables.map((cv) => {
+              const val = contact.metadata?.[cv.key];
+              if (!val) return null;
+              return (
+                <div key={cv.id}>
+                  <span className="text-sm text-gray-500">{cv.name}</span>
+                  <p className="font-medium">{String(val)}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Lists */}
       {contact.lists && contact.lists.length > 0 && (
         <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
@@ -241,6 +280,40 @@ export default function ContactDetail() {
                   <option value="unsubscribed">Unsubscribed</option>
                 </select>
               </div>
+              {customVariables.length > 0 && (
+                <>
+                  <div className="border-t border-gray-200 pt-3 mt-1">
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Custom Fields</p>
+                  </div>
+                  {customVariables.map((cv) => (
+                    <div key={cv.id}>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                        {cv.name}{cv.required && ' *'}
+                      </label>
+                      {cv.type === 'select' ? (
+                        <select
+                          value={editMetadata[cv.key] || ''}
+                          onChange={(e) => setEditMetadata({ ...editMetadata, [cv.key]: e.target.value })}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                        >
+                          <option value="">-- Select --</option>
+                          {cv.options.map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={cv.type === 'number' ? 'number' : cv.type === 'date' ? 'date' : 'text'}
+                          value={editMetadata[cv.key] || ''}
+                          onChange={(e) => setEditMetadata({ ...editMetadata, [cv.key]: e.target.value })}
+                          placeholder={cv.default_value || ''}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button

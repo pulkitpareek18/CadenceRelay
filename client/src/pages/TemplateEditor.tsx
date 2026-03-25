@@ -4,6 +4,7 @@ import Editor from '@monaco-editor/react';
 import toast from 'react-hot-toast';
 import { getTemplate, createTemplate, updateTemplate, getTemplateVersions } from '../api/templates.api';
 import { sendTestEmail } from '../api/settings.api';
+import { useCustomVariables } from '../hooks/useCustomVariables';
 
 const DEFAULT_HTML = `<!DOCTYPE html>
 <html>
@@ -49,6 +50,21 @@ export default function TemplateEditor() {
   const [showTestModal, setShowTestModal] = useState(false);
   const [testEmail, setTestEmail] = useState('');
   const [sendingTest, setSendingTest] = useState(false);
+  const [showVariablesPanel, setShowVariablesPanel] = useState(false);
+
+  const { data: customVariables = [] } = useCustomVariables();
+
+  const STANDARD_VARIABLES = [
+    { key: 'name', label: 'Contact Name' },
+    { key: 'email', label: 'Email Address' },
+    { key: 'state', label: 'State' },
+    { key: 'district', label: 'District' },
+    { key: 'block', label: 'Block' },
+    { key: 'classes', label: 'Classes' },
+    { key: 'category', label: 'Category' },
+    { key: 'management', label: 'Management' },
+    { key: 'address', label: 'Address' },
+  ];
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const savedStateRef = useRef({ name: '', subject: '', htmlBody: DEFAULT_HTML });
@@ -190,6 +206,12 @@ export default function TemplateEditor() {
         {hasUnsavedChanges && (
           <span className="text-xs text-orange-500 font-medium">Unsaved</span>
         )}
+        <button
+          onClick={() => setShowVariablesPanel(!showVariablesPanel)}
+          className={`rounded-lg border px-3 py-1.5 text-sm ${showVariablesPanel ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-gray-300 hover:bg-gray-50'}`}
+        >
+          Variables
+        </button>
         <button onClick={() => setShowTestModal(true)} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">
           Send Test
         </button>
@@ -210,31 +232,86 @@ export default function TemplateEditor() {
 
       {/* Editor + Preview split */}
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-1/2 border-r border-gray-200">
-          <Editor
-            height="100%"
-            defaultLanguage="html"
-            value={htmlBody}
-            onChange={(val) => setHtmlBody(val || '')}
-            theme="vs-dark"
-            options={{
-              minimap: { enabled: false },
-              fontSize: 13,
-              wordWrap: 'on',
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-            }}
-          />
-        </div>
-        <div className="w-1/2 bg-gray-100 p-4">
-          <div className="mb-2 text-xs font-medium text-gray-500">Preview</div>
-          <iframe
-            ref={iframeRef}
-            className="h-full w-full rounded-lg border bg-white"
-            title="Template Preview"
-            sandbox="allow-same-origin"
-            onLoad={handleIframeLoad}
-          />
+        {/* Available Variables Panel */}
+        {showVariablesPanel && (
+          <div className="w-56 flex-shrink-0 overflow-y-auto border-r border-gray-200 bg-white p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Available Variables</h3>
+              <button onClick={() => setShowVariablesPanel(false)} className="text-gray-400 hover:text-gray-600 text-xs">&times;</button>
+            </div>
+            <p className="mb-3 text-xs text-gray-400">Click to copy. Use in templates as {'{{key}}'}.</p>
+
+            <div className="mb-3">
+              <h4 className="mb-1 text-xs font-medium text-gray-500">Standard</h4>
+              <div className="space-y-1">
+                {STANDARD_VARIABLES.map((v) => (
+                  <button
+                    key={v.key}
+                    onClick={() => {
+                      navigator.clipboard.writeText(`{{${v.key}}}`);
+                      toast.success(`Copied {{${v.key}}}`);
+                    }}
+                    className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-gray-100"
+                    title={`Click to copy {{${v.key}}}`}
+                  >
+                    <code className="text-blue-600 font-mono">{`{{${v.key}}}`}</code>
+                    <span className="ml-1 text-gray-400">{v.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {customVariables.length > 0 && (
+              <div>
+                <h4 className="mb-1 text-xs font-medium text-gray-500">Custom</h4>
+                <div className="space-y-1">
+                  {customVariables.map((cv) => (
+                    <button
+                      key={cv.id}
+                      onClick={() => {
+                        navigator.clipboard.writeText(`{{${cv.key}}}`);
+                        toast.success(`Copied {{${cv.key}}}`);
+                      }}
+                      className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-gray-100"
+                      title={`Click to copy {{${cv.key}}}`}
+                    >
+                      <code className="text-purple-600 font-mono">{`{{${cv.key}}}`}</code>
+                      <span className="ml-1 text-gray-400">{cv.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className={showVariablesPanel ? 'flex flex-1 overflow-hidden' : 'flex flex-1 overflow-hidden'}>
+          <div className="w-1/2 border-r border-gray-200">
+            <Editor
+              height="100%"
+              defaultLanguage="html"
+              value={htmlBody}
+              onChange={(val) => setHtmlBody(val || '')}
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                wordWrap: 'on',
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+              }}
+            />
+          </div>
+          <div className="w-1/2 bg-gray-100 p-4">
+            <div className="mb-2 text-xs font-medium text-gray-500">Preview</div>
+            <iframe
+              ref={iframeRef}
+              className="h-full w-full rounded-lg border bg-white"
+              title="Template Preview"
+              sandbox="allow-same-origin"
+              onLoad={handleIframeLoad}
+            />
+          </div>
         </div>
       </div>
 

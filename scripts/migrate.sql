@@ -199,3 +199,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS unsub_email_campaign_idx ON unsubscribes(email
 -- Performance indexes
 CREATE INDEX IF NOT EXISTS cr_campaign_status_idx ON campaign_recipients(campaign_id, status);
 CREATE INDEX IF NOT EXISTS contacts_created_idx ON contacts(created_at);
+
+-- Custom variable definitions
+CREATE TABLE IF NOT EXISTS custom_variables (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name varchar(100) NOT NULL,
+    key varchar(100) UNIQUE NOT NULL,
+    type varchar(20) DEFAULT 'text',
+    options jsonb DEFAULT '[]'::jsonb,
+    required boolean DEFAULT false,
+    default_value varchar(255),
+    sort_order integer DEFAULT 0,
+    created_at timestamptz DEFAULT NOW()
+);

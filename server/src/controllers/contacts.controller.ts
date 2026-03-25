@@ -430,6 +430,10 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
       }
     }
 
+    // Fetch custom variable definitions to detect metadata columns
+    const cvResult = await pool.query('SELECT key FROM custom_variables ORDER BY sort_order');
+    const customVariableKeys = new Set(cvResult.rows.map((r: { key: string }) => r.key));
+
     // --- Stream-based CSV import for large files (65MB+, 280K+ rows) ---
     // Instead of loading the entire file into memory, we read line-by-line.
 
@@ -440,6 +444,8 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
 
     let headers: string[] | null = null;
     const mapping: Record<string, number> = {};
+    // Track which CSV column indices map to custom variable keys
+    const metadataMapping: Record<string, number> = {};
     let imported = 0;
     let skipped = 0;
     let duplicates = 0;
@@ -456,6 +462,7 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
       category: string | null;
       management: string | null;
       address: string | null;
+      metadata: Record<string, string>;
     };
 
     const BATCH_SIZE = 500;
@@ -486,7 +493,7 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
 
       for (const row of uniqueRows) {
         valuesPlaceholders.push(
-          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`
+          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9})`
         );
         queryParams.push(
           truncate(row.email, 320),
@@ -497,14 +504,15 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
           truncate(row.classes, 255),
           truncate(row.category, 100),
           truncate(row.management, 100),
-          row.address // text — no limit
+          row.address, // text — no limit
+          Object.keys(row.metadata).length > 0 ? JSON.stringify(row.metadata) : '{}'
         );
-        paramIdx += 9;
+        paramIdx += 10;
       }
 
       try {
         const insertResult = await pool.query(
-          `INSERT INTO contacts (email, name, state, district, block, classes, category, management, address)
+          `INSERT INTO contacts (email, name, state, district, block, classes, category, management, address, metadata)
            VALUES ${valuesPlaceholders.join(', ')}
            ON CONFLICT (email) DO UPDATE SET
              name = COALESCE(EXCLUDED.name, contacts.name),
@@ -515,6 +523,7 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
              category = COALESCE(EXCLUDED.category, contacts.category),
              management = COALESCE(EXCLUDED.management, contacts.management),
              address = COALESCE(EXCLUDED.address, contacts.address),
+             metadata = contacts.metadata || EXCLUDED.metadata,
              updated_at = NOW()
            RETURNING id, (xmax = 0) AS is_new`,
           queryParams
@@ -562,9 +571,18 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
         for (let i = 0; i < headers.length; i++) {
           const header = headers[i];
           if (columnMapping && columnMapping[header]) {
-            mapping[columnMapping[header]] = i;
+            const target = columnMapping[header];
+            // Check if mapped target is a custom variable key
+            if (customVariableKeys.has(target)) {
+              metadataMapping[target] = i;
+            } else {
+              mapping[target] = i;
+            }
           } else if (COLUMN_MAP[header]) {
             mapping[COLUMN_MAP[header]] = i;
+          } else if (customVariableKeys.has(header)) {
+            // Auto-detect: CSV header matches a custom variable key
+            metadataMapping[header] = i;
           }
         }
         if (mapping['email'] === undefined) {
@@ -590,6 +608,13 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
         return cols[mapping[key]]?.trim() || null;
       };
 
+      // Build metadata from custom variable columns
+      const rowMetadata: Record<string, string> = {};
+      for (const [cvKey, colIdx] of Object.entries(metadataMapping)) {
+        const val = cols[colIdx]?.trim();
+        if (val) rowMetadata[cvKey] = val;
+      }
+
       batch.push({
         email,
         name: getCol('name'),
@@ -600,6 +625,7 @@ export async function importContactsCSV(req: Request, res: Response, next: NextF
         category: getCol('category'),
         management: getCol('management'),
         address: getCol('address'),
+        metadata: rowMetadata,
       });
 
       if (batch.length >= BATCH_SIZE) {
@@ -652,6 +678,10 @@ export async function previewCSV(req: Request, res: Response, next: NextFunction
       throw new AppError('CSV file required', 400);
     }
 
+    // Fetch custom variable definitions to auto-detect metadata columns
+    const cvResult = await pool.query('SELECT key FROM custom_variables ORDER BY sort_order');
+    const customVariableKeys = new Set(cvResult.rows.map((r: { key: string }) => r.key));
+
     // Read only the first 64KB for preview (works for any file size)
     const fd = fs.openSync(filePath, 'r');
     const buf = Buffer.alloc(64 * 1024);
@@ -672,6 +702,8 @@ export async function previewCSV(req: Request, res: Response, next: NextFunction
       const lower = header.toLowerCase();
       if (COLUMN_MAP[lower]) {
         autoMapping[header] = COLUMN_MAP[lower];
+      } else if (customVariableKeys.has(lower)) {
+        autoMapping[header] = lower;
       }
     }
 
