@@ -3,6 +3,7 @@ import { pool } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { cacheThrough, cacheDel } from '../utils/cache';
 import { encryptCredential, decryptCredential, isEncrypted } from '../utils/crypto';
+import { logger } from '../utils/logger';
 
 // FIX: Mask sensitive fields so credentials are never returned in plaintext
 const SENSITIVE_KEYS = ['pass', 'password', 'secretAccessKey', 'secret', 'accessKeyId'];
@@ -125,6 +126,7 @@ export async function updateGmailConfig(req: Request, res: Response, next: NextF
 export async function updateSesConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { region, accessKeyId, secretAccessKey, fromEmail, fromName } = req.body;
+    logger.info('SES config update request', { hasFromName: !!fromName, fromNameValue: fromName, bodyKeys: Object.keys(req.body) });
 
     // Load existing config to preserve unchanged encrypted fields
     const existingResult = await pool.query("SELECT value FROM settings WHERE key = 'ses_config'");
