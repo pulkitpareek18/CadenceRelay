@@ -65,6 +65,9 @@ export async function getSettings(_req: Request, res: Response, next: NextFuncti
       return s;
     }, 60);
 
+    // Disable ETag/304 for settings — stale 304 responses cause saved values to appear lost
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('ETag', `W/"${Date.now()}"`);
     res.json({ settings });
   } catch (err) {
     next(err);
@@ -148,7 +151,9 @@ export async function updateSesConfig(req: Request, res: Response, next: NextFun
       ? existingConfig.secretAccessKey || ''
       : encryptCredential(secretAccessKey);
 
-    const config = { region, accessKeyId: finalAccessKeyId, secretAccessKey: finalSecretAccessKey, fromEmail, fromName: fromName || '' };
+    // Preserve existing fromName if user didn't change it (sent as empty)
+    const finalFromName = fromName || existingConfig.fromName || '';
+    const config = { region, accessKeyId: finalAccessKeyId, secretAccessKey: finalSecretAccessKey, fromEmail, fromName: finalFromName };
 
     await pool.query(
       'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2',
