@@ -23,7 +23,7 @@ function SettingsContent() {
 
   const [provider, setProvider] = useState<'gmail' | 'ses'>('ses');
   const [gmail, setGmail] = useState({ host: 'smtp.gmail.com', port: 587, user: '', pass: '' });
-  const [ses, setSes] = useState({ region: 'ap-south-1', accessKeyId: '', secretAccessKey: '', fromEmail: '' });
+  const [ses, setSes] = useState({ region: 'ap-south-1', accessKeyId: '', secretAccessKey: '', fromEmail: '', fromName: '' });
   const [throttle, setThrottle] = useState({ perSecond: 5, perHour: 5000 });
   const [replyTo, setReplyTo] = useState('');
   const [replyToError, setReplyToError] = useState('');
@@ -282,6 +282,11 @@ function SettingsContent() {
               <label className="block text-sm font-medium text-gray-700">From Email *</label>
               <input type="email" value={ses.fromEmail} onChange={(e) => { setSes({ ...ses, fromEmail: e.target.value }); setSesErrors((p) => ({ ...p, fromEmail: '' })); }} className={inputClass(sesErrors.fromEmail)} />
               {sesErrors.fromEmail && <p className="mt-1 text-xs text-red-500">{sesErrors.fromEmail}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">From Name</label>
+              <input type="text" placeholder="e.g. BITS PILANI - YEB" value={ses.fromName} onChange={(e) => setSes({ ...ses, fromName: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border" />
+              <p className="mt-1 text-xs text-gray-500">Display name shown in recipient's inbox</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Access Key ID *</label>

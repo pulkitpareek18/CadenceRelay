@@ -124,7 +124,7 @@ export async function updateGmailConfig(req: Request, res: Response, next: NextF
 
 export async function updateSesConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { region, accessKeyId, secretAccessKey, fromEmail } = req.body;
+    const { region, accessKeyId, secretAccessKey, fromEmail, fromName } = req.body;
 
     // Load existing config to preserve unchanged encrypted fields
     const existingResult = await pool.query("SELECT value FROM settings WHERE key = 'ses_config'");
@@ -146,7 +146,7 @@ export async function updateSesConfig(req: Request, res: Response, next: NextFun
       ? existingConfig.secretAccessKey || ''
       : encryptCredential(secretAccessKey);
 
-    const config = { region, accessKeyId: finalAccessKeyId, secretAccessKey: finalSecretAccessKey, fromEmail };
+    const config = { region, accessKeyId: finalAccessKeyId, secretAccessKey: finalSecretAccessKey, fromEmail, fromName: fromName || '' };
 
     await pool.query(
       'UPDATE settings SET value = $1, updated_at = NOW() WHERE key = $2',

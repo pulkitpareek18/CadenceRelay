@@ -12,15 +12,21 @@ interface SESConfig {
   accessKeyId: string;
   secretAccessKey: string;
   fromEmail: string;
+  fromName?: string;
 }
 
 export class SESProvider implements EmailProvider {
   private client: SESClient;
   private fromEmail: string;
+  private fromAddress: string;
   private transporter: nodemailer.Transporter;
 
   constructor(config: SESConfig) {
     this.fromEmail = config.fromEmail;
+    // Build "Display Name <email>" format if fromName is provided
+    this.fromAddress = config.fromName
+      ? `"${config.fromName}" <${config.fromEmail}>`
+      : config.fromEmail;
     this.client = new SESClient({
       region: config.region,
       credentials: {
@@ -36,7 +42,7 @@ export class SESProvider implements EmailProvider {
     try {
       // Build the raw MIME email using Nodemailer (supports attachments, HTML, text, headers)
       const mailOptions: nodemailer.SendMailOptions = {
-        from: options.from || this.fromEmail,
+        from: options.from || this.fromAddress,
         to: options.to,
         subject: options.subject,
         html: options.html,
@@ -59,7 +65,7 @@ export class SESProvider implements EmailProvider {
         RawMessage: {
           Data: rawMessage,
         },
-        Source: options.from || this.fromEmail,
+        Source: options.from || this.fromAddress,
         Destinations: [options.to],
       });
 

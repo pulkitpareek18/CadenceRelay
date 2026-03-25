@@ -30,7 +30,7 @@ export function createProvider(provider: string, config: Record<string, unknown>
       });
     }
     case 'ses': {
-      const sesConfig = config as { region: string; accessKeyId: string; secretAccessKey: string; fromEmail: string };
+      const sesConfig = config as { region: string; accessKeyId: string; secretAccessKey: string; fromEmail: string; fromName?: string };
       return new SESProvider({
         ...sesConfig,
         accessKeyId: maybeDecrypt(sesConfig.accessKeyId),
