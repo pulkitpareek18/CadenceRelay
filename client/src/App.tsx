@@ -50,6 +50,7 @@ export default function App() {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/campaigns" element={<Campaigns />} />
                       <Route path="/campaigns/new" element={<CampaignCreate />} />
+                      <Route path="/campaigns/:id/edit" element={<CampaignCreate />} />
                       <Route path="/campaigns/:id" element={<CampaignDetail />} />
                       <Route path="/contacts" element={<Contacts />} />
                       <Route path="/contacts/:id" element={<ContactDetail />} />

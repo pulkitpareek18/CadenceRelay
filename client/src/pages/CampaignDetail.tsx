@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { getCampaign, pauseCampaign, resumeCampaign, getCampaignRecipients, scheduleCampaign, sendCampaign, updateCampaign, Campaign } from '../api/campaigns.api';
+import { getCampaign, pauseCampaign, resumeCampaign, getCampaignRecipients, scheduleCampaign, Campaign } from '../api/campaigns.api';
 import { getRecipientEvents } from '../api/analytics.api';
-import { listTemplates, Template } from '../api/templates.api';
-import { listLists } from '../api/lists.api';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-700',
@@ -54,116 +52,7 @@ export default function CampaignDetail() {
   const [showReschedule, setShowReschedule] = useState(false);
   const [newScheduledAt, setNewScheduledAt] = useState('');
   const [rescheduling, setRescheduling] = useState(false);
-  // Draft editing state
-  const [showEditDraft, setShowEditDraft] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editTemplateId, setEditTemplateId] = useState('');
-  const [editListId, setEditListId] = useState('');
-  const [editProvider, setEditProvider] = useState<'gmail' | 'ses'>('ses');
-  const [editThrottlePerSecond, setEditThrottlePerSecond] = useState(5);
-  const [editThrottlePerHour, setEditThrottlePerHour] = useState(5000);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
-  const [savingDraft, setSavingDraft] = useState(false);
-  const [sendingNow, setSendingNow] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [scheduleAt, setScheduleAt] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Load templates and lists for edit dropdowns
-  useEffect(() => {
-    if (campaign?.status === 'draft' || campaign?.status === 'scheduled') {
-      listTemplates().then(setTemplates).catch(() => {});
-      listLists().then((res) => setLists(res)).catch(() => {});
-    }
-  }, [campaign?.status]);
-
-  // Populate edit form when campaign loads
-  useEffect(() => {
-    if (campaign && (campaign.status === 'draft' || campaign.status === 'scheduled')) {
-      setEditName(campaign.name);
-      setEditTemplateId(campaign.template_id || '');
-      setEditListId(campaign.list_id || '');
-      setEditProvider((campaign.provider as 'gmail' | 'ses') || 'ses');
-      setEditThrottlePerSecond(campaign.throttle_per_second || 5);
-      setEditThrottlePerHour(campaign.throttle_per_hour || 5000);
-    }
-  }, [campaign]);
-
-  async function handleSaveDraftEdits() {
-    if (!id || !editName.trim()) return;
-    setSavingDraft(true);
-    try {
-      await updateCampaign(id, {
-        name: editName,
-        templateId: editTemplateId || undefined,
-        listId: editListId || undefined,
-        provider: editProvider,
-        throttlePerSecond: editThrottlePerSecond,
-        throttlePerHour: editThrottlePerHour,
-      });
-      toast.success('Campaign updated');
-      setShowEditDraft(false);
-      fetchCampaign();
-    } catch {
-      toast.error('Failed to save');
-    } finally {
-      setSavingDraft(false);
-    }
-  }
-
-  async function handleSendNow() {
-    if (!id) return;
-    if (!editTemplateId || !editListId) {
-      toast.error('Template and list are required before sending');
-      return;
-    }
-    if (!confirm('Send this campaign now? This will start sending immediately.')) return;
-    setSendingNow(true);
-    try {
-      // Save any pending edits first
-      await updateCampaign(id, {
-        name: editName,
-        templateId: editTemplateId,
-        listId: editListId,
-        provider: editProvider,
-        throttlePerSecond: editThrottlePerSecond,
-        throttlePerHour: editThrottlePerHour,
-      });
-      await sendCampaign(id);
-      toast.success('Campaign sending started!');
-      fetchCampaign();
-    } catch {
-      toast.error('Failed to send campaign');
-    } finally {
-      setSendingNow(false);
-    }
-  }
-
-  async function handleScheduleDraft() {
-    if (!id || !scheduleAt) return;
-    if (!editTemplateId || !editListId) {
-      toast.error('Template and list are required before scheduling');
-      return;
-    }
-    try {
-      // Save edits first
-      await updateCampaign(id, {
-        name: editName,
-        templateId: editTemplateId,
-        listId: editListId,
-        provider: editProvider,
-        throttlePerSecond: editThrottlePerSecond,
-        throttlePerHour: editThrottlePerHour,
-      });
-      await scheduleCampaign(id, new Date(scheduleAt).toISOString());
-      toast.success('Campaign scheduled!');
-      setShowScheduleModal(false);
-      fetchCampaign();
-    } catch {
-      toast.error('Failed to schedule — time must be in the future');
-    }
-  }
 
   async function handleReschedule() {
     if (!id || !newScheduledAt) return;
@@ -304,19 +193,9 @@ export default function CampaignDetail() {
           {campaign.status === 'sending' && <button onClick={handlePause} className="rounded-lg border border-orange-300 px-4 py-2 text-sm text-orange-600">Pause</button>}
           {campaign.status === 'paused' && <button onClick={handleResume} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white">Resume</button>}
           {(campaign.status === 'draft' || campaign.status === 'scheduled') && (
-            <>
-              <button onClick={() => setShowEditDraft(!showEditDraft)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                {showEditDraft ? 'Hide Editor' : 'Edit Campaign'}
-              </button>
-              {campaign.status === 'draft' && (
-                <>
-                  <button onClick={() => setShowScheduleModal(true)} className="rounded-lg border border-blue-300 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50">Schedule</button>
-                  <button onClick={handleSendNow} disabled={sendingNow} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50">
-                    {sendingNow ? 'Sending...' : 'Send Now'}
-                  </button>
-                </>
-              )}
-            </>
+            <button onClick={() => navigate(`/campaigns/${id}/edit`)} className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700">
+              Edit & Send
+            </button>
           )}
         </div>
       </div>
@@ -330,124 +209,6 @@ export default function CampaignDetail() {
           </div>
           <div className="mt-1 h-2 w-full rounded-full bg-gray-200">
             <div className="h-2 rounded-full bg-primary-600 transition-all" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-      )}
-
-      {/* Draft/Scheduled Edit Panel */}
-      {showEditDraft && (campaign.status === 'draft' || campaign.status === 'scheduled') && (
-        <div className="mt-4 rounded-xl bg-white p-6 shadow-sm border-2 border-primary-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Edit Campaign</h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-gray-700">Campaign Name *</label>
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Template *</label>
-              <select
-                value={editTemplateId}
-                onChange={(e) => setEditTemplateId(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              >
-                <option value="">Select a template</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.version})</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Contact List *</label>
-              <select
-                value={editListId}
-                onChange={(e) => setEditListId(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              >
-                <option value="">Select a list</option>
-                {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Provider</label>
-              <select
-                value={editProvider}
-                onChange={(e) => setEditProvider(e.target.value as 'gmail' | 'ses')}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              >
-                <option value="ses">AWS SES</option>
-                <option value="gmail">Gmail SMTP</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Throttle (per second)</label>
-              <input
-                type="number"
-                value={editThrottlePerSecond}
-                onChange={(e) => setEditThrottlePerSecond(Number(e.target.value))}
-                min={1}
-                max={50}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Throttle (per hour)</label>
-              <input
-                type="number"
-                value={editThrottlePerHour}
-                onChange={(e) => setEditThrottlePerHour(Number(e.target.value))}
-                min={10}
-                max={50000}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="mt-4 flex items-center gap-2 border-t border-gray-100 pt-4">
-            <button
-              onClick={handleSaveDraftEdits}
-              disabled={savingDraft || !editName.trim()}
-              className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50"
-            >
-              {savingDraft ? 'Saving...' : 'Save Changes'}
-            </button>
-            <button onClick={() => setShowEditDraft(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50">
-              Cancel
-            </button>
-            {(!editTemplateId || !editListId) && (
-              <span className="text-xs text-amber-600">⚠ Template and list are required to send/schedule</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Schedule Modal for Draft */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6">
-            <h3 className="text-lg font-semibold">Schedule Campaign</h3>
-            <p className="mt-1 text-sm text-gray-500">Choose when to send "{editName}"</p>
-            <div className="mt-4">
-              <label className="mb-1 block text-sm font-medium text-gray-700">Send Date & Time</label>
-              <input
-                type="datetime-local"
-                value={scheduleAt}
-                onChange={(e) => setScheduleAt(e.target.value)}
-                min={new Date().toISOString().slice(0, 16)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
-              />
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setShowScheduleModal(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50">Cancel</button>
-              <button
-                onClick={handleScheduleDraft}
-                disabled={!scheduleAt}
-                className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50"
-              >
-                Schedule
-              </button>
-            </div>
           </div>
         </div>
       )}

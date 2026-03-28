@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { createCampaign, scheduleCampaign, sendCampaign } from '../api/campaigns.api';
+import { createCampaign, getCampaign, updateCampaign, scheduleCampaign, sendCampaign } from '../api/campaigns.api';
 import { listTemplates, Template } from '../api/templates.api';
 import { listLists, ContactList } from '../api/lists.api';
 import UploadProgress, { FileUploadProgress } from '../components/ui/UploadProgress';
@@ -40,9 +40,12 @@ function FileIcon({ filename }: { filename: string }) {
 
 export default function CampaignCreate() {
   const navigate = useNavigate();
+  const { id: editId } = useParams<{ id: string }>();
+  const isEditing = !!editId;
   const [step, setStep] = useState(1);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [lists, setLists] = useState<ContactList[]>([]);
+  const [editLoaded, setEditLoaded] = useState(false);
 
   // Form state
   const [name, setName] = useState('');
@@ -73,7 +76,21 @@ export default function CampaignCreate() {
   useEffect(() => {
     listTemplates().then(setTemplates).catch(() => {});
     listLists().then(setLists).catch(() => {});
-  }, []);
+
+    // Load existing campaign data when editing a draft
+    if (editId && !editLoaded) {
+      getCampaign(editId).then((c) => {
+        setName(c.name || '');
+        setTemplateId(c.template_id || '');
+        setListId(c.list_id || '');
+        setProvider((c.provider as 'gmail' | 'ses') || 'ses');
+        setThrottlePerSecond(c.throttle_per_second || 5);
+        setThrottlePerHour(c.throttle_per_hour || 5000);
+        setDraftId(c.id);
+        setEditLoaded(true);
+      }).catch(() => toast.error('Failed to load campaign'));
+    }
+  }, [editId]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId);
   const selectedList = lists.find((l) => l.id === listId);
@@ -159,26 +176,39 @@ export default function CampaignCreate() {
       const controller = new AbortController();
       abortRef.current = () => controller.abort();
 
-      const campaign = await createCampaign({
-        name, templateId, listId, provider, throttlePerSecond, throttlePerHour,
-        attachments: hasAttachments ? attachments : undefined,
-        onProgress: hasAttachments ? (state) => setCampaignUploadState(state) : undefined,
-        signal: controller.signal,
-      });
+      let campaignId: string;
 
-      if (hasAttachments) {
+      if (isEditing && draftId) {
+        // Editing existing draft — update it
+        await updateCampaign(draftId, {
+          name, templateId, listId, provider, throttlePerSecond, throttlePerHour,
+        });
+        campaignId = draftId;
+        // TODO: handle attachments for existing campaigns if needed
+      } else {
+        // Creating new campaign
+        const campaign = await createCampaign({
+          name, templateId, listId, provider, throttlePerSecond, throttlePerHour,
+          attachments: hasAttachments ? attachments : undefined,
+          onProgress: hasAttachments ? (state) => setCampaignUploadState(state) : undefined,
+          signal: controller.signal,
+        });
+        campaignId = campaign.id;
+      }
+
+      if (hasAttachments && !isEditing) {
         setCampaignUploadState((prev) => ({ ...prev, status: 'complete', progress: 100 }));
       }
 
       if (scheduleType === 'later' && scheduledAt) {
-        await scheduleCampaign(campaign.id, new Date(scheduledAt).toISOString());
+        await scheduleCampaign(campaignId, new Date(scheduledAt).toISOString());
         toast.success('Campaign scheduled');
       } else {
-        await sendCampaign(campaign.id);
+        await sendCampaign(campaignId);
         toast.success('Campaign sending started');
       }
 
-      navigate(`/campaigns/${campaign.id}`);
+      navigate(`/campaigns/${campaignId}`);
     } catch (err) {
       const isCancelled = err instanceof Error && err.name === 'CanceledError';
       if (isCancelled) {
@@ -283,7 +313,7 @@ export default function CampaignCreate() {
   return (
     <div className="mx-auto max-w-3xl p-6">
       <button onClick={() => navigate('/campaigns')} className="mb-4 text-sm text-primary-600">&larr; Back</button>
-      <h1 className="text-2xl font-bold">Create Campaign</h1>
+      <h1 className="text-2xl font-bold">{isEditing ? 'Edit Campaign' : 'Create Campaign'}</h1>
 
       {/* Step indicators */}
       <div className="mt-6 flex gap-2">
