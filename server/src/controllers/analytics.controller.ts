@@ -187,7 +187,7 @@ export async function getDashboard(req: Request, res: Response, next: NextFuncti
 
     // Campaign status breakdown
     const statusBreakdown = await pool.query(
-      `SELECT status, COUNT(*) as count FROM campaigns WHERE 1=1 ${dateFilter} GROUP BY status`,
+      `SELECT c.status, COUNT(*) as count FROM campaigns c WHERE 1=1 ${dateFilter} GROUP BY c.status`,
       params
     );
 
