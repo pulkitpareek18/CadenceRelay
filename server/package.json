@@ -19,6 +19,9 @@
     "@aws-sdk/client-ses": "^3.500.0",
     "@aws-sdk/client-sesv2": "^3.1022.0",
     "@aws-sdk/client-sns": "^3.500.0",
+    "@types/archiver": "^7.0.0",
+    "@types/unzipper": "^0.10.11",
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.1.0",
     "cors": "^2.8.5",
@@ -37,6 +40,7 @@
     "nodemailer": "^6.9.8",
     "pg": "^8.11.3",
     "rate-limiter-flexible": "^4.0.1",
+    "unzipper": "^0.12.3",
     "uuid": "^9.0.0",
     "winston": "^3.11.0",
     "zod": "^3.22.4"

@@ -15,6 +15,7 @@ import projectsRoutes from './projects.routes';
 import suppressionRoutes from './suppression.routes';
 import automationsRoutes from './automations.routes';
 import emailAccountRoutes from './emailAccounts.routes';
+import backupRoutes from './backup.routes';
 import trackingRoutes from './tracking.routes';
 import webhookRoutes from './webhooks.routes';
 import sseRoutes from './sse.routes';
@@ -55,6 +56,7 @@ router.use('/projects', authenticate, projectsRoutes);
 router.use('/suppression', authenticate, suppressionRoutes);
 router.use('/automations', authenticate, automationsRoutes);
 router.use('/email-accounts', authenticate, emailAccountRoutes);
+router.use('/backup', authenticate, backupRoutes);
 
 router.use('/analytics', authenticate, analyticsRoutes);
 

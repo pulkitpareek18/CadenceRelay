@@ -47,6 +47,7 @@ import type { EmailAccount } from '../api/emailAccounts.api';
 import { FormSkeleton } from '../components/ui/Skeleton';
 import ErrorBoundary from '../components/ErrorBoundary';
 import AdminPasswordModal from '../components/ui/AdminPasswordModal';
+import { downloadBackup, restoreBackup } from '../api/backup.api';
 
 type ConnectionStatus = 'idle' | 'testing' | 'success' | 'error';
 
@@ -193,6 +194,45 @@ function SettingsContent() {
   const addSuppressionMutation = useAddToSuppression();
   const bulkAddSuppressionMutation = useBulkAddToSuppression();
   const removeSuppressionMutation = useRemoveFromSuppression();
+
+  // Backup & Restore state
+  const [backupExporting, setBackupExporting] = useState(false);
+  const [backupRestoreFile, setBackupRestoreFile] = useState<File | null>(null);
+  const [backupRestorePassword, setBackupRestorePassword] = useState('');
+  const [backupRestoring, setBackupRestoring] = useState(false);
+  const [backupShowConfirm, setBackupShowConfirm] = useState(false);
+
+  async function handleBackupExport() {
+    setBackupExporting(true);
+    try {
+      await downloadBackup();
+      toast.success('Backup downloaded');
+    } catch (err) {
+      toast.error('Backup export failed: ' + ((err as Error).message || 'Unknown error'));
+    } finally {
+      setBackupExporting(false);
+    }
+  }
+
+  async function handleBackupRestore() {
+    if (!backupRestoreFile) { toast.error('Select a backup file first'); return; }
+    if (!backupRestorePassword) { toast.error('Admin password required'); return; }
+    setBackupRestoring(true);
+    try {
+      const result = await restoreBackup(backupRestoreFile, backupRestorePassword);
+      const total = Object.values(result.restored).reduce((a, b) => a + b, 0);
+      toast.success(`Restored ${total} rows. Reloading…`);
+      setBackupRestoreFile(null);
+      setBackupRestorePassword('');
+      setBackupShowConfirm(false);
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err) {
+      const axErr = err as { response?: { data?: { error?: string; message?: string } } };
+      toast.error(axErr?.response?.data?.error || axErr?.response?.data?.message || 'Restore failed');
+    } finally {
+      setBackupRestoring(false);
+    }
+  }
 
   // Email Accounts state
   const { data: emailAccounts = [] } = useEmailAccounts();
@@ -1505,6 +1545,98 @@ function SettingsContent() {
         ) : (
           <div className="mt-4 rounded-lg border-2 border-dashed border-gray-200 p-6 text-center">
             <p className="text-sm text-gray-500">{domainSuppSearch ? 'No matching domains found' : 'No suppressed domains yet'}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Backup & Restore */}
+      <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-900">Backup &amp; Restore</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Export everything (contacts, templates, campaigns, settings, email accounts, attachments) into a single <code>.crelay</code> file.
+          Import that file later to fully restore the platform — including all data and uploaded files.
+        </p>
+
+        {/* Export */}
+        <div className="mt-4 rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="font-medium text-gray-900">Export full backup</h3>
+              <p className="mt-0.5 text-xs text-gray-500">Downloads a single <code>.crelay</code> archive containing every table and uploaded file. Large databases may take a minute.</p>
+            </div>
+            <button
+              onClick={handleBackupExport}
+              disabled={backupExporting}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              {backupExporting ? 'Exporting…' : 'Download Backup'}
+            </button>
+          </div>
+        </div>
+
+        {/* Restore */}
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50/50 p-4">
+          <h3 className="font-medium text-red-900">Restore from backup</h3>
+          <p className="mt-0.5 text-xs text-red-700">
+            ⚠️ This will <strong>delete all existing data</strong> and replace it with the contents of the backup file. This cannot be undone.
+          </p>
+          <div className="mt-3 space-y-2">
+            <input
+              type="file"
+              accept=".crelay,.zip"
+              onChange={(e) => setBackupRestoreFile(e.target.files?.[0] || null)}
+              className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-200 file:px-3 file:py-1.5 file:text-sm file:text-gray-700 hover:file:bg-gray-300"
+            />
+            {backupRestoreFile && (
+              <div className="text-xs text-gray-600">
+                Selected: <span className="font-mono">{backupRestoreFile.name}</span> ({(backupRestoreFile.size / 1024 / 1024).toFixed(2)} MB)
+              </div>
+            )}
+            <button
+              onClick={() => setBackupShowConfirm(true)}
+              disabled={!backupRestoreFile || backupRestoring}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {backupRestoring ? 'Restoring…' : 'Restore Backup'}
+            </button>
+          </div>
+        </div>
+
+        {backupShowConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Restore</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                This will <strong className="text-red-600">permanently delete all existing data</strong> and replace it with the backup file:
+                <br />
+                <span className="font-mono text-xs">{backupRestoreFile?.name}</span>
+              </p>
+              <p className="mt-2 text-sm text-gray-600">Enter your admin password to confirm.</p>
+              <input
+                type="password"
+                value={backupRestorePassword}
+                onChange={(e) => setBackupRestorePassword(e.target.value)}
+                placeholder="Admin password"
+                autoFocus
+                className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  onClick={() => { setBackupShowConfirm(false); setBackupRestorePassword(''); }}
+                  disabled={backupRestoring}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBackupRestore}
+                  disabled={!backupRestorePassword || backupRestoring}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {backupRestoring ? 'Restoring…' : 'Yes, Wipe & Restore'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
