@@ -176,6 +176,18 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
         const columns = Object.keys(rows[0]);
         const colList = columns.map((c) => `"${c}"`).join(', ');
 
+        // Introspect column types so we know which need JSON serialization.
+        // jsonb/json: stringify every non-null value regardless of JS type
+        //   (a JSON string like "on" would otherwise be sent as bare `on` and fail).
+        const typeRes = await client.query<{ column_name: string; data_type: string }>(
+          `SELECT column_name, data_type FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1`,
+          [table]
+        );
+        const jsonCols = new Set(
+          typeRes.rows.filter((r) => r.data_type === 'jsonb' || r.data_type === 'json').map((r) => r.column_name)
+        );
+
         // Insert in batches of 500
         const BATCH = 500;
         for (let i = 0; i < rows.length; i += BATCH) {
@@ -187,11 +199,15 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
             const rowPlaceholders: string[] = [];
             for (const col of columns) {
               const v = row[col];
-              // jsonb columns: pg stringifies plain objects but treats arrays as Postgres arrays,
-              // so explicitly stringify any non-Date object/array.
               if (v === undefined || v === null) {
                 values.push(null);
-              } else if (typeof v === "object" && !(v instanceof Date) && !Buffer.isBuffer(v)) {
+              } else if (jsonCols.has(col)) {
+                // Always JSON.stringify for jsonb/json columns — covers strings,
+                // numbers, booleans, arrays, and objects uniformly.
+                values.push(JSON.stringify(v));
+              } else if (typeof v === 'object' && !(v instanceof Date) && !Buffer.isBuffer(v)) {
+                // Defensive: any other object/array on a non-json column gets stringified
+                // (shouldn't happen for our schema, but better than a crash).
                 values.push(JSON.stringify(v));
               } else {
                 values.push(v);
