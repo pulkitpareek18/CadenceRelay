@@ -150,9 +150,21 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
     try {
       await client.query('BEGIN');
 
+      // Tables we refuse to wipe/restore when the operator has pinned the
+      // matching env var. These are deploy-bootstrap settings — restoring a
+      // backup from another instance must not silently rotate them.
+      //   admin_users   <- ADMIN_USERNAME (login credentials)
+      // tracking_domain row inside settings is filtered separately below.
+      const PROTECTED_TABLES = new Set<string>();
+      if (process.env.ADMIN_USERNAME) PROTECTED_TABLES.add('admin_users');
+
       // Wipe in REVERSE order (children first, then parents)
       const reversed = [...BACKUP_TABLES].reverse();
       for (const table of reversed) {
+        if (PROTECTED_TABLES.has(table)) {
+          logger.warn(`Backup restore: skipping wipe of protected table ${table} (env-pinned credentials preserved)`);
+          continue;
+        }
         const exists = await client.query(`SELECT to_regclass($1) AS exists`, [`public.${table}`]);
         if (!exists.rows[0]?.exists) continue;
         await client.query(`DELETE FROM ${table}`);
@@ -160,6 +172,12 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
 
       // Restore in dependency order
       for (const table of BACKUP_TABLES) {
+        if (PROTECTED_TABLES.has(table)) {
+          // Wipe was already skipped; skipping restore keeps live row intact.
+          restoredCounts[table] = 0;
+          continue;
+        }
+
         const dataPath = path.join(tempDir, 'data', `${table}.json`);
         if (!fs.existsSync(dataPath)) continue;
 
