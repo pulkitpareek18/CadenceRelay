@@ -187,8 +187,15 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
             const rowPlaceholders: string[] = [];
             for (const col of columns) {
               const v = row[col];
-              // pg driver handles JSON stringify for jsonb columns automatically when value is object
-              values.push(v === undefined ? null : v);
+              // jsonb columns: pg stringifies plain objects but treats arrays as Postgres arrays,
+              // so explicitly stringify any non-Date object/array.
+              if (v === undefined || v === null) {
+                values.push(null);
+              } else if (typeof v === "object" && !(v instanceof Date) && !Buffer.isBuffer(v)) {
+                values.push(JSON.stringify(v));
+              } else {
+                values.push(v);
+              }
               rowPlaceholders.push(`$${idx++}`);
             }
             placeholders.push(`(${rowPlaceholders.join(', ')})`);
