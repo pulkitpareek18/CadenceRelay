@@ -14,6 +14,7 @@ import {
 } from '../services/email/EmailProvider';
 import { checkDailyLimit, incrementDailySend } from '../utils/dailyLimits';
 import { isEmailSuppressed } from '../controllers/suppression.controller';
+import { resolveTrackingDomain } from '../utils/trackingDomain';
 
 interface DispatchJobData {
   campaignId: string;
@@ -187,9 +188,8 @@ async function loadDispatchContext(campaignId: string) {
     providerConfig = providerResult.rows[0]?.value || {};
   }
 
-  // Load tracking domain
-  const trackingResult = await pool.query("SELECT value FROM settings WHERE key = 'tracking_domain'");
-  const trackingDomain = trackingResult.rows[0]?.value || 'http://localhost:3001';
+  // Load tracking domain (env wins over DB row — see trackingDomain util).
+  const trackingDomain = await resolveTrackingDomain();
 
   // Load reply-to: campaign-level overrides global setting
   let replyTo: string | undefined;

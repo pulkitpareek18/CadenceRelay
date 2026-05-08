@@ -3,9 +3,14 @@ import { config } from './config';
 import { testDatabaseConnection, closeDatabasePool } from './config/database';
 import { testRedisConnection, closeRedisConnection } from './config/redis';
 import { logger } from './utils/logger';
+import { assertTrackingDomainAtBoot } from './utils/trackingDomain';
 
 async function main(): Promise<void> {
   logger.info(`Starting server in ${config.nodeEnv} mode`);
+
+  // Refuse to boot with a bad tracking domain in production — sending out a
+  // campaign with the wrong tracking host silently breaks every open/click.
+  assertTrackingDomainAtBoot();
 
   // Test connections
   const dbOk = await testDatabaseConnection();
