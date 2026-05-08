@@ -8,6 +8,7 @@ import { encryptCredential, decryptCredential, isEncrypted } from '../utils/cryp
 import { logger } from '../utils/logger';
 import { SESClient, GetSendQuotaCommand, GetSendStatisticsCommand, SetIdentityNotificationTopicCommand, GetIdentityNotificationAttributesCommand } from '@aws-sdk/client-ses';
 import { SNSClient, CreateTopicCommand, SubscribeCommand } from '@aws-sdk/client-sns';
+import { resolveTrackingDomain } from '../utils/trackingDomain';
 
 const dnsPromises = dns.promises;
 
@@ -352,11 +353,14 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
     }
 
     // Add List-Unsubscribe headers for deliverability (even on test emails)
-    const trackingResult2 = await pool.query("SELECT value FROM settings WHERE key = 'tracking_domain'");
-    let trackingDomainVal = trackingResult2.rows[0]?.value || '';
-    if (typeof trackingDomainVal === 'string') trackingDomainVal = trackingDomainVal.replace(/^"|"$/g, '');
+    let trackingDomainVal = '';
+    try {
+      trackingDomainVal = await resolveTrackingDomain();
+    } catch {
+      // dev / unconfigured env — skip List-Unsubscribe rather than fail the test send
+    }
     const unsubHeaders: Record<string, string> = {};
-    if (trackingDomainVal && trackingDomainVal !== 'http://localhost:3001') {
+    if (trackingDomainVal && !trackingDomainVal.startsWith('http://localhost')) {
       const testUnsubUrl = `${trackingDomainVal}/api/v1/t/u/test-${Date.now()}`;
       unsubHeaders['List-Unsubscribe'] = `<${testUnsubUrl}>`;
       unsubHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
@@ -722,15 +726,15 @@ export async function setupSns(_req: Request, res: Response, next: NextFunction)
       throw new AppError('SES fromEmail is not configured. Please set a From Email in SES settings first.', 400);
     }
 
-    // Load tracking domain for the webhook endpoint
-    const trackingResult = await pool.query("SELECT value FROM settings WHERE key = 'tracking_domain'");
-    let trackingDomain = trackingResult.rows[0]?.value || '';
-    // Strip surrounding quotes if stored as JSON string
-    if (typeof trackingDomain === 'string') {
-      trackingDomain = trackingDomain.replace(/^"|"$/g, '');
+    // Load tracking domain for the webhook endpoint (env-authoritative).
+    let trackingDomain: string;
+    try {
+      trackingDomain = await resolveTrackingDomain();
+    } catch (e) {
+      throw new AppError(`Tracking domain misconfigured: ${(e as Error).message}`, 500);
     }
-    if (!trackingDomain || trackingDomain === 'http://localhost:3001') {
-      throw new AppError('A public tracking domain is required for SNS webhook subscriptions. Please configure a tracking domain in settings (not localhost).', 400);
+    if (trackingDomain.startsWith('http://localhost')) {
+      throw new AppError('A public tracking domain is required for SNS webhook subscriptions. Please set TRACKING_DOMAIN to a public https URL.', 400);
     }
 
     // 1. Create SNS topic (idempotent)

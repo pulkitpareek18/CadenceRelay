@@ -166,7 +166,21 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
         const exists = await client.query(`SELECT to_regclass($1) AS exists`, [`public.${table}`]);
         if (!exists.rows[0]?.exists) continue;
 
-        const rows: Record<string, unknown>[] = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+        let rows: Record<string, unknown>[] = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+
+        // Strip tracking_domain from a settings restore when the operator has
+        // pinned TRACKING_DOMAIN via env. Restoring someone else's tracking host
+        // into a live DB silently mis-targets every subsequent campaign send.
+        if (table === 'settings' && process.env.TRACKING_DOMAIN) {
+          const before = rows.length;
+          rows = rows.filter((r) => r.key !== 'tracking_domain');
+          if (rows.length !== before) {
+            logger.warn('Backup restore: dropped tracking_domain row from settings to preserve env-pinned TRACKING_DOMAIN', {
+              envTrackingDomain: process.env.TRACKING_DOMAIN,
+            });
+          }
+        }
+
         if (rows.length === 0) {
           restoredCounts[table] = 0;
           continue;

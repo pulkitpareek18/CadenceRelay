@@ -10,9 +10,13 @@ import { checkGmailBounces } from './gmailBounceChecker';
 import { runEngagementDecay } from './engagementDecay';
 import { processAutomationSteps } from './automationProcessor';
 import { runAutoSuppression } from './autoSuppression';
+import { assertTrackingDomainAtBoot } from '../utils/trackingDomain';
 
 async function startWorker(): Promise<void> {
   logger.info(`Starting worker in ${config.nodeEnv} mode`);
+
+  // Match the API server: refuse to start with a bad tracking domain.
+  assertTrackingDomainAtBoot();
 
   const dbOk = await testDatabaseConnection();
   if (!dbOk) {
