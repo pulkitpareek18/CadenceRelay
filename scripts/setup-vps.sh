@@ -44,7 +44,7 @@ JWT_SECRET=CHANGE_ME_JWT_SECRET_AT_LEAST_32_CHARS
 JWT_REFRESH_SECRET=CHANGE_ME_REFRESH_SECRET_AT_LEAST_32_CHARS
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=CHANGE_ME_ADMIN_PASSWORD
-TRACKING_DOMAIN=https://yeb.mail.intellimix.online
+TRACKING_DOMAIN=https://cadencerelay.thefoundersweb.com
 ENVEOF
     echo "Created .env - PLEASE EDIT WITH REAL PASSWORDS before starting!"
     echo "Edit: nano /opt/cadencerelay/.env"
@@ -60,7 +60,7 @@ echo ""
 echo "=== Setup complete! ==="
 echo "Next steps:"
 echo "1. Edit /opt/cadencerelay/.env with real passwords"
-echo "2. Point DNS: yeb.mail.intellimix.online -> $(curl -s ifconfig.me)"
+echo "2. Point DNS: cadencerelay.thefoundersweb.com -> $(curl -s ifconfig.me)"
 echo "3. Run: cd /opt/cadencerelay && docker compose -f docker-compose.prod.yml up -d --build"
 echo "4. Run migrations: docker compose -f docker-compose.prod.yml exec server npx node-pg-migrate up --migrations-dir dist/db/migrations --migration-file-language js"
 echo "5. Seed admin: docker compose -f docker-compose.prod.yml exec server node dist/db/seeds/001_admin-user.js"

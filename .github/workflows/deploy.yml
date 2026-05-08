@@ -37,7 +37,8 @@ jobs:
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -e
             cd /opt/cadencerelay
@@ -93,7 +94,7 @@ jobs:
             # Verify API is reachable through nginx
             echo "Verifying API through nginx..."
             for i in $(seq 1 10); do
-              STATUS=$(curl -sk -o /dev/null -w "%{http_code}" https://yeb.mail.intellimix.online/api/v1/health 2>/dev/null || echo "000")
+              STATUS=$(curl -sk -o /dev/null -w "%{http_code}" https://cadencerelay.thefoundersweb.com/api/v1/health 2>/dev/null || echo "000")
               if [ "$STATUS" = "200" ]; then
                 echo "Deployment verified — API responding 200 OK"
                 break
