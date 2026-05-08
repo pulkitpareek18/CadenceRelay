@@ -48,8 +48,11 @@ jobs:
             source .env
             set +a
 
-            # Pull latest code
-            git pull origin main
+            # Sync to latest main, discarding any local drift on the VPS
+            # (the VPS is a deploy target, not an editing surface — main is source of truth).
+            # .env, certbot-etc/, certbot-var/, certbot-webroot/ are untracked / gitignored, so survive.
+            git fetch origin main
+            git reset --hard origin/main
 
             # Rebuild containers (postgres & redis are NOT rebuilt — data is safe)
             docker compose -f docker-compose.prod.yml build --no-cache server worker client
