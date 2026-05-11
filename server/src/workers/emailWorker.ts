@@ -157,6 +157,23 @@ function shuffleArray<T>(arr: T[]): T[] {
   return arr;
 }
 
+/**
+ * Always-on visible body unsubscribe link. Skips injection only when the
+ * rendered HTML already contains the exact unsubscribe URL we'd add — that
+ * way templates using {{unsubscribe_url}} don't get a duplicate, but the
+ * old "the word 'unsubscribe' appears somewhere" loophole is closed.
+ * Google's bulk-sender rules require a visible, functional opt-out link.
+ */
+function ensureUnsubscribeFooter(html: string, trackingDomain: string, trackingToken: string): string {
+  const unsubUrl = `${trackingDomain}/api/v1/t/u/${trackingToken}`;
+  if (html.includes(unsubUrl)) return html;
+  const footer = `<div style="text-align:center;padding:20px;font-size:12px;color:#999;">If you no longer want to receive these emails, <a href="${unsubUrl}" style="color:#999;text-decoration:underline;">unsubscribe</a>.</div>`;
+  if (html.includes('</body>')) {
+    return html.replace('</body>', footer + '</body>');
+  }
+  return html + footer;
+}
+
 async function loadDispatchContext(campaignId: string) {
   // Load campaign
   const campResult = await pool.query('SELECT * FROM campaigns WHERE id = $1', [campaignId]);
@@ -466,15 +483,7 @@ async function handleDispatch(job: Job<DispatchJobData>) {
       const renderedSubject = renderTemplate(subjectSource, variables);
       const renderedText = template.text_body ? renderTemplate(template.text_body, variables) : null;
 
-      // Auto-inject unsubscribe link if template doesn't include one
-      if (!renderedHtml.toLowerCase().includes('unsubscribe')) {
-        const unsubLink = `<div style="text-align:center;padding:20px;font-size:12px;color:#999;"><a href="${trackingDomain}/api/v1/t/u/${trackingToken}" style="color:#999;text-decoration:underline;">Unsubscribe</a></div>`;
-        if (renderedHtml.includes('</body>')) {
-          renderedHtml = renderedHtml.replace('</body>', unsubLink + '</body>');
-        } else {
-          renderedHtml += unsubLink;
-        }
-      }
+      renderedHtml = ensureUnsubscribeFooter(renderedHtml, trackingDomain, trackingToken);
 
       await emailSendQueue.add('send', {
         campaignRecipientId: recipientId,
@@ -506,15 +515,7 @@ async function handleDispatch(job: Job<DispatchJobData>) {
       const renderedSubject = renderTemplate(variantBSubject, variables);
       const renderedText = variantBTemplate.text_body ? renderTemplate(variantBTemplate.text_body, variables) : null;
 
-      // Auto-inject unsubscribe link if template doesn't include one
-      if (!renderedHtml.toLowerCase().includes('unsubscribe')) {
-        const unsubLink = `<div style="text-align:center;padding:20px;font-size:12px;color:#999;"><a href="${trackingDomain}/api/v1/t/u/${trackingToken}" style="color:#999;text-decoration:underline;">Unsubscribe</a></div>`;
-        if (renderedHtml.includes('</body>')) {
-          renderedHtml = renderedHtml.replace('</body>', unsubLink + '</body>');
-        } else {
-          renderedHtml += unsubLink;
-        }
-      }
+      renderedHtml = ensureUnsubscribeFooter(renderedHtml, trackingDomain, trackingToken);
 
       await emailSendQueue.add('send', {
         campaignRecipientId: recipientId,
@@ -652,15 +653,7 @@ async function handleDispatch(job: Job<DispatchJobData>) {
         const renderedSubject = renderTemplate((campaign.subject_override as string) || template.subject, variables);
         const renderedText = template.text_body ? renderTemplate(template.text_body, variables) : null;
 
-        // Auto-inject unsubscribe link if template doesn't include one
-        if (!renderedHtml.toLowerCase().includes('unsubscribe')) {
-          const unsubLink = `<div style="text-align:center;padding:20px;font-size:12px;color:#999;"><a href="${trackingDomain}/api/v1/t/u/${trackingToken}" style="color:#999;text-decoration:underline;">Unsubscribe</a></div>`;
-          if (renderedHtml.includes('</body>')) {
-            renderedHtml = renderedHtml.replace('</body>', unsubLink + '</body>');
-          } else {
-            renderedHtml += unsubLink;
-          }
-        }
+        renderedHtml = ensureUnsubscribeFooter(renderedHtml, trackingDomain, trackingToken);
 
         chunkJobs.push({
           name: 'send',
@@ -806,15 +799,7 @@ async function handlePickABWinner(job: Job<DispatchJobData>) {
     const renderedSubject = renderTemplate(winnerSubject, variables);
     const renderedText = winnerTemplate.text_body ? renderTemplate(winnerTemplate.text_body, variables) : null;
 
-    // Auto-inject unsubscribe link if template doesn't include one
-    if (!renderedHtml.toLowerCase().includes('unsubscribe')) {
-      const unsubLink = `<div style="text-align:center;padding:20px;font-size:12px;color:#999;"><a href="${trackingDomain}/api/v1/t/u/${row.tracking_token}" style="color:#999;text-decoration:underline;">Unsubscribe</a></div>`;
-      if (renderedHtml.includes('</body>')) {
-        renderedHtml = renderedHtml.replace('</body>', unsubLink + '</body>');
-      } else {
-        renderedHtml += unsubLink;
-      }
-    }
+    renderedHtml = ensureUnsubscribeFooter(renderedHtml, trackingDomain, row.tracking_token);
 
     await emailSendQueue.add('send', {
       campaignRecipientId: row.id,
@@ -986,10 +971,16 @@ export function startEmailSendWorker(): Worker {
 
       // Build headers (RFC 8058 one-click unsubscribe)
       const unsubUrl = `${trackingDomain}/api/v1/t/u/${trackingToken}`;
+      // Google's Feedback-ID format: CampaignID:CustomerID:MailType:SenderID
+      // Letting these be env-tunable lets a single deployment serve multiple
+      // tenants without recompiling.
+      const fbCustomer = process.env.FEEDBACK_ID_CUSTOMER || 'thefoundersweb';
+      const fbMailType = process.env.FEEDBACK_ID_MAILTYPE || 'bulk';
+      const fbSender = process.env.FEEDBACK_ID_SENDER || 'cadencerelay';
       const headers: Record<string, string> = {
         'List-Unsubscribe': `<${unsubUrl}>`,
         'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-        'Feedback-ID': `${campaignId}:cadencerelay`,
+        'Feedback-ID': `${campaignId}:${fbCustomer}:${fbMailType}:${fbSender}`,
       };
 
       // Load attachments from disk

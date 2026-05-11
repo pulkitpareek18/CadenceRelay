@@ -188,6 +188,11 @@ export async function unsubscribeGet(req: Request, res: Response): Promise<void>
   `);
 }
 
+// RFC 8058 one-click unsubscribe endpoint.
+// Gmail/Yahoo/etc POST here with `Content-Type: application/x-www-form-urlencoded`
+// and body `List-Unsubscribe=One-Click`. The response MUST distinguish between
+// "real unsubscribe processed" (2xx) and "this token is not valid" (4xx) — if
+// we 200 on every input, mailbox providers conclude the endpoint is fake.
 export async function unsubscribePost(req: Request, res: Response): Promise<void> {
   const { token } = req.params;
 
@@ -197,74 +202,60 @@ export async function unsubscribePost(req: Request, res: Response): Promise<void
       [token]
     );
 
-    if (result.rows.length > 0) {
-      const { id, campaign_id, email } = result.rows[0];
-
-      // Use a transaction so all unsubscribe updates are atomic
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-
-        // Update contact status
-        await client.query("UPDATE contacts SET status = 'unsubscribed', updated_at = NOW() WHERE email = $1", [email]);
-
-        // Update recipient (only if not already unsubscribed to avoid double-counting)
-        const updateResult = await client.query(
-          "UPDATE campaign_recipients SET status = 'unsubscribed' WHERE id = $1 AND status != 'unsubscribed' RETURNING id",
-          [id]
-        );
-
-        // Only insert event and increment counter if status actually changed
-        if (updateResult.rows.length > 0) {
-          // Record event
-          await client.query(
-            "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type) VALUES ($1, $2, 'unsubscribed')",
-            [id, campaign_id]
-          );
-
-          // Update campaign counter
-          await client.query(
-            'UPDATE campaigns SET unsubscribe_count = unsubscribe_count + 1, updated_at = NOW() WHERE id = $1',
-            [campaign_id]
-          );
-        }
-
-        // Add to unsubscribes table
-        await client.query(
-          'INSERT INTO unsubscribes (email, campaign_id) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING',
-          [email, campaign_id]
-        );
-
-        // Auto-add to suppression list
-        await client.query(
-          "INSERT INTO suppression_list (email, reason, added_by) VALUES ($1, 'unsubscribed', 'auto') ON CONFLICT DO NOTHING",
-          [email]
-        );
-
-        await client.query('COMMIT');
-      } catch (txErr) {
-        await client.query('ROLLBACK');
-        throw txErr;
-      } finally {
-        client.release();
-      }
-
-      // Update engagement score (fire-and-forget, after transaction commit)
-      updateEngagementScore(email, 'unsubscribed');
+    if (result.rows.length === 0) {
+      res.status(404).type('text/plain').send('Unknown unsubscribe token');
+      return;
     }
 
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head><title>Unsubscribed</title></head>
-      <body style="font-family:sans-serif;text-align:center;padding:50px;">
-        <h2>You have been unsubscribed</h2>
-        <p>You will no longer receive emails from us.</p>
-      </body>
-      </html>
-    `);
+    const { id, campaign_id, email } = result.rows[0];
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query("UPDATE contacts SET status = 'unsubscribed', updated_at = NOW() WHERE email = $1", [email]);
+
+      const updateResult = await client.query(
+        "UPDATE campaign_recipients SET status = 'unsubscribed' WHERE id = $1 AND status != 'unsubscribed' RETURNING id",
+        [id]
+      );
+
+      if (updateResult.rows.length > 0) {
+        await client.query(
+          "INSERT INTO email_events (campaign_recipient_id, campaign_id, event_type) VALUES ($1, $2, 'unsubscribed')",
+          [id, campaign_id]
+        );
+
+        await client.query(
+          'UPDATE campaigns SET unsubscribe_count = unsubscribe_count + 1, updated_at = NOW() WHERE id = $1',
+          [campaign_id]
+        );
+      }
+
+      await client.query(
+        'INSERT INTO unsubscribes (email, campaign_id) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING',
+        [email, campaign_id]
+      );
+
+      await client.query(
+        "INSERT INTO suppression_list (email, reason, added_by) VALUES ($1, 'unsubscribed', 'auto') ON CONFLICT DO NOTHING",
+        [email]
+      );
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    updateEngagementScore(email, 'unsubscribed');
+
+    // Minimal 2xx body — mailbox providers parse the status, not the body.
+    res.status(200).type('text/plain').send('Unsubscribed');
   } catch (err) {
     logger.error('Unsubscribe error', { error: (err as Error).message });
-    res.status(500).send('Error processing unsubscribe');
+    res.status(500).type('text/plain').send('Error processing unsubscribe');
   }
 }
