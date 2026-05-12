@@ -4,6 +4,9 @@ import { renderTemplate, htmlToPlainText } from '../utils/templateRenderer';
 import { createProvider } from '../services/email/providerFactory';
 import { checkDailyLimit, incrementDailySend } from '../utils/dailyLimits';
 import { isEmailSuppressed } from '../controllers/suppression.controller';
+import { resolveTrackingDomain } from '../utils/trackingDomain';
+import { generateContactUnsubToken } from '../utils/unsubscribeToken';
+import { ensureUnsubscribeFooter } from '../utils/unsubscribeFooter';
 
 function buildContactVariables(contact: Record<string, unknown>): Record<string, string> {
   const variables: Record<string, string> = {
@@ -159,11 +162,30 @@ async function processEnrollment(
     return;
   }
 
+  // Resolve tracking domain + per-contact HMAC unsubscribe token. Automation
+  // sends have no campaign_recipients row, so we can't use a tracking_token —
+  // the HMAC token is stateless and stable per contact, so unsubscribe still
+  // works without persisting anything extra per send.
+  let trackingDomain: string;
+  try {
+    trackingDomain = await resolveTrackingDomain();
+  } catch (e) {
+    logger.error('Automation send skipped: tracking domain unresolved', {
+      enrollmentId,
+      error: (e as Error).message,
+    });
+    return;
+  }
+  const unsubToken = generateContactUnsubToken(contact.id);
+  const unsubUrl = `${trackingDomain}/api/v1/t/u/${unsubToken}`;
+
   // Build variables and render
   const variables = buildContactVariables(contact);
+  variables['unsubscribe_url'] = unsubUrl;
   const subject = step.subject_override || template.subject;
   const renderedSubject = renderTemplate(subject, variables);
-  const renderedHtml = renderTemplate(template.html_body, variables);
+  let renderedHtml = renderTemplate(template.html_body, variables);
+  renderedHtml = ensureUnsubscribeFooter(renderedHtml, trackingDomain, unsubToken);
   const renderedText = template.text_body ? renderTemplate(template.text_body, variables) : undefined;
 
   // Load provider config
@@ -192,6 +214,18 @@ async function processEnrollment(
     }
   }
 
+  // RFC 8058 one-click unsubscribe headers — required for bulk-sender
+  // compliance with Gmail/Yahoo. Feedback-ID uses the 4-part form Google
+  // expects: CampaignID:Customer:MailType:Sender (here CampaignID is the
+  // automation id since there's no campaign).
+  const fbCustomer = process.env.FEEDBACK_ID_CUSTOMER || 'thefoundersweb';
+  const fbSender = process.env.FEEDBACK_ID_SENDER || 'cadencerelay';
+  const headers: Record<string, string> = {
+    'List-Unsubscribe': `<${unsubUrl}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    'Feedback-ID': `${automationId}:${fbCustomer}:automation:${fbSender}`,
+  };
+
   // Send email
   try {
     const emailProvider = createProvider(provider, providerConfig);
@@ -201,6 +235,7 @@ async function processEnrollment(
       html: renderedHtml,
       text: renderedText || htmlToPlainText(renderedHtml),
       replyTo,
+      headers,
     });
 
     // Increment daily counter

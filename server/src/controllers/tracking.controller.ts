@@ -3,6 +3,7 @@ import { pool } from '../config/database';
 import { logger } from '../utils/logger';
 import { updateEngagementScore } from '../utils/engagementScore';
 import { fireAutomationTrigger } from '../workers/automationProcessor';
+import { parseContactUnsubToken } from '../utils/unsubscribeToken';
 
 // 1x1 transparent GIF pixel
 const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
@@ -193,10 +194,26 @@ export async function unsubscribeGet(req: Request, res: Response): Promise<void>
 // and body `List-Unsubscribe=One-Click`. The response MUST distinguish between
 // "real unsubscribe processed" (2xx) and "this token is not valid" (4xx) — if
 // we 200 on every input, mailbox providers conclude the endpoint is fake.
+//
+// Two token shapes are accepted:
+//   1. campaign_recipients.tracking_token (32 hex chars) — campaign sends.
+//   2. HMAC contact token (c_<uuid>.<sig>) — sends that don't have a
+//      campaign_recipients row, e.g. automation drips.
 export async function unsubscribePost(req: Request, res: Response): Promise<void> {
   const { token } = req.params;
 
   try {
+    const hmacContactId = parseContactUnsubToken(token);
+    if (hmacContactId) {
+      const ok = await unsubscribeByContactId(hmacContactId);
+      if (!ok) {
+        res.status(404).type('text/plain').send('Unknown unsubscribe token');
+        return;
+      }
+      res.status(200).type('text/plain').send('Unsubscribed');
+      return;
+    }
+
     const result = await pool.query(
       'SELECT id, campaign_id, email FROM campaign_recipients WHERE tracking_token = $1',
       [token]
@@ -258,4 +275,35 @@ export async function unsubscribePost(req: Request, res: Response): Promise<void
     logger.error('Unsubscribe error', { error: (err as Error).message });
     res.status(500).type('text/plain').send('Error processing unsubscribe');
   }
+}
+
+// HMAC-token unsubscribe path: no campaign context, just suppress the contact
+// and add to the global suppression list. Returns false when the contact id
+// is well-formed-but-unknown so we can 404 the request.
+async function unsubscribeByContactId(contactId: string): Promise<boolean> {
+  const lookup = await pool.query('SELECT email FROM contacts WHERE id = $1', [contactId]);
+  if (lookup.rows.length === 0) return false;
+  const email = lookup.rows[0].email;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      "UPDATE contacts SET status = 'unsubscribed', updated_at = NOW() WHERE id = $1",
+      [contactId]
+    );
+    await client.query(
+      "INSERT INTO suppression_list (email, reason, added_by) VALUES ($1, 'unsubscribed', 'auto') ON CONFLICT DO NOTHING",
+      [email]
+    );
+    await client.query('COMMIT');
+  } catch (txErr) {
+    await client.query('ROLLBACK');
+    throw txErr;
+  } finally {
+    client.release();
+  }
+
+  updateEngagementScore(email, 'unsubscribed');
+  return true;
 }
