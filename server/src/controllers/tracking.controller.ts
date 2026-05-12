@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { updateEngagementScore } from '../utils/engagementScore';
 import { fireAutomationTrigger } from '../workers/automationProcessor';
 import { parseContactUnsubToken } from '../utils/unsubscribeToken';
+import { parseClickToken } from '../utils/clickToken';
 
 // 1x1 transparent GIF pixel
 const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
@@ -85,6 +86,19 @@ export async function trackOpen(req: Request, res: Response, _next: NextFunction
 export async function trackClick(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { token, linkIndex } = req.params;
+
+    // Stateless HMAC click token (used by the /settings/test-email QA path,
+    // which has no campaign_recipients row to look up link_urls in). The URL
+    // is signed into the token itself — we verify HMAC and redirect.
+    if (token.startsWith('t_')) {
+      const url = parseClickToken(token);
+      if (!url) {
+        res.status(404).send('Link not found');
+        return;
+      }
+      res.redirect(302, url);
+      return;
+    }
 
     // FIX: Validate linkIndex is a valid non-negative integer
     const idx = parseInt(linkIndex);
