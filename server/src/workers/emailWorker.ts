@@ -15,6 +15,7 @@ import {
 import { checkDailyLimit, incrementDailySend } from '../utils/dailyLimits';
 import { isEmailSuppressed } from '../controllers/suppression.controller';
 import { resolveTrackingDomain } from '../utils/trackingDomain';
+import { ensureUnsubscribeFooter } from '../utils/unsubscribeFooter';
 
 interface DispatchJobData {
   campaignId: string;
@@ -155,23 +156,6 @@ function shuffleArray<T>(arr: T[]): T[] {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
-}
-
-/**
- * Always-on visible body unsubscribe link. Skips injection only when the
- * rendered HTML already contains the exact unsubscribe URL we'd add — that
- * way templates using {{unsubscribe_url}} don't get a duplicate, but the
- * old "the word 'unsubscribe' appears somewhere" loophole is closed.
- * Google's bulk-sender rules require a visible, functional opt-out link.
- */
-function ensureUnsubscribeFooter(html: string, trackingDomain: string, trackingToken: string): string {
-  const unsubUrl = `${trackingDomain}/api/v1/t/u/${trackingToken}`;
-  if (html.includes(unsubUrl)) return html;
-  const footer = `<div style="text-align:center;padding:20px;font-size:12px;color:#999;">If you no longer want to receive these emails, <a href="${unsubUrl}" style="color:#999;text-decoration:underline;">unsubscribe</a>.</div>`;
-  if (html.includes('</body>')) {
-    return html.replace('</body>', footer + '</body>');
-  }
-  return html + footer;
 }
 
 async function loadDispatchContext(campaignId: string) {
