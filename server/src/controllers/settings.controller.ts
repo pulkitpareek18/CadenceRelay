@@ -9,6 +9,8 @@ import { logger } from '../utils/logger';
 import { SESClient, GetSendQuotaCommand, GetSendStatisticsCommand, SetIdentityNotificationTopicCommand, GetIdentityNotificationAttributesCommand } from '@aws-sdk/client-ses';
 import { SNSClient, CreateTopicCommand, SubscribeCommand } from '@aws-sdk/client-sns';
 import { resolveTrackingDomain } from '../utils/trackingDomain';
+import { ensureUnsubscribeFooter } from '../utils/unsubscribeFooter';
+import { generateClickToken } from '../utils/clickToken';
 
 const dnsPromises = dns.promises;
 
@@ -323,8 +325,7 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
 
     const { htmlToPlainText } = await import('../utils/templateRenderer');
     const emailSubject = subject || 'Test Email from CadenceRelay';
-    const emailHtml = html || '<h1>Test Email</h1><p>If you received this, your email provider is configured correctly.</p>';
-    const emailText = htmlToPlainText(emailHtml);
+    let emailHtml = html || '<h1>Test Email</h1><p>If you received this, your email provider is configured correctly.</p>';
 
     // Load attachments from campaign if campaignId is provided
     let attachments: Array<{ filename: string; content: Buffer; contentType: string }> | undefined;
@@ -352,19 +353,61 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
       }
     }
 
-    // Add List-Unsubscribe headers for deliverability (even on test emails)
-    let trackingDomainVal = '';
+    // Mirror the campaign worker's send flow so test emails have identical
+    // wire shape to production sends — same tracking pixel, same click
+    // rewriting, same unsubscribe footer, same headers. This is the only
+    // way to QA how Gmail/etc will classify a template before the real run.
+    //
+    // Stateless tokens are used since there's no campaign_recipients row:
+    //   - tracking pixel + List-Unsubscribe use `test-<timestamp>` (open
+    //     pixel silently no-ops on unknown tokens; unsubscribe 200s via the
+    //     `test-*` short-circuit in tracking.controller).
+    //   - links are rewritten with HMAC click tokens (`t_<b64url>.<sig>`)
+    //     so clicks actually redirect to the real URL.
+    let trackingDomain = '';
     try {
-      trackingDomainVal = await resolveTrackingDomain();
+      trackingDomain = await resolveTrackingDomain();
     } catch {
-      // dev / unconfigured env — skip List-Unsubscribe rather than fail the test send
+      // dev / unconfigured env — fall back to plain send
     }
-    const unsubHeaders: Record<string, string> = {};
-    if (trackingDomainVal && !trackingDomainVal.startsWith('http://localhost')) {
-      const testUnsubUrl = `${trackingDomainVal}/api/v1/t/u/test-${Date.now()}`;
-      unsubHeaders['List-Unsubscribe'] = `<${testUnsubUrl}>`;
-      unsubHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+    const headers: Record<string, string> = {};
+
+    if (trackingDomain && !trackingDomain.startsWith('http://localhost')) {
+      const testToken = `test-${Date.now()}`;
+      const unsubUrl = `${trackingDomain}/api/v1/t/u/${testToken}`;
+
+      // 1. Inject open-tracking pixel
+      const pixelUrl = `${trackingDomain}/api/v1/t/o/${testToken}`;
+      const trackingPixel = `<img src="${pixelUrl}" width="1" height="1" style="display:block" alt="" />`;
+      if (emailHtml.includes('</body>')) {
+        emailHtml = emailHtml.replace('</body>', `${trackingPixel}</body>`);
+      } else {
+        emailHtml = emailHtml + trackingPixel;
+      }
+
+      // 2. Rewrite links with HMAC click tokens (skip mailto:, anchor, and
+      //    tracking-domain URLs to avoid double-wrapping our own pixel/unsub).
+      emailHtml = emailHtml.replace(/<a\s+([^>]*?)href=["']([^"']+)["']([^>]*?)>/gi, (_m: string, pre: string, url: string, post: string) => {
+        if (url.startsWith('mailto:') || url.startsWith('#')) return `<a ${pre}href="${url}"${post}>`;
+        if (url.startsWith(trackingDomain)) return `<a ${pre}href="${url}"${post}>`;
+        const clickToken = generateClickToken(url);
+        const trackUrl = `${trackingDomain}/api/v1/t/c/${clickToken}/0`;
+        return `<a ${pre}href="${trackUrl}"${post}>`;
+      });
+
+      // 3. Visible unsubscribe footer
+      emailHtml = ensureUnsubscribeFooter(emailHtml, trackingDomain, testToken);
+
+      // 4. Headers — same shape as campaign worker
+      const fbCustomer = process.env.FEEDBACK_ID_CUSTOMER || 'thefoundersweb';
+      const fbMailType = process.env.FEEDBACK_ID_MAILTYPE || 'bulk';
+      const fbSender = process.env.FEEDBACK_ID_SENDER || 'cadencerelay';
+      headers['List-Unsubscribe'] = `<${unsubUrl}>`;
+      headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+      headers['Feedback-ID'] = `test:${fbCustomer}:${fbMailType}:${fbSender}`;
     }
+
+    const emailText = htmlToPlainText(emailHtml);
 
     await emailProvider.send({
       to,
@@ -372,7 +415,7 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
       html: emailHtml,
       text: emailText,
       replyTo,
-      headers: unsubHeaders,
+      headers,
       attachments,
     });
 
