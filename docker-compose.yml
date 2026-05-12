@@ -71,6 +71,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-bulk_email_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-bulk_email}
       REDIS_URL: redis://redis:6379
       UPLOAD_DIR: /app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'node dist/workers' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     env_file:
       - path: .env.production
         required: false

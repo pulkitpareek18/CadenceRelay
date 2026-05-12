@@ -126,16 +126,30 @@ export async function importBackup(req: Request, res: Response, next: NextFuncti
     const tempZipPath = path.join(tempDir, 'backup.zip');
     fs.writeFileSync(tempZipPath, file.buffer);
 
-    await fs.createReadStream(tempZipPath)
-      .pipe(unzipper.Extract({ path: tempDir }))
-      .promise();
+    try {
+      await fs.createReadStream(tempZipPath)
+        .pipe(unzipper.Extract({ path: tempDir }))
+        .promise();
+    } catch (extractErr) {
+      const message = extractErr instanceof Error ? extractErr.message : String(extractErr);
+      logger.warn('Backup restore rejected unreadable archive', { error: message });
+      throw new AppError(
+        'Invalid or incomplete backup archive. The uploaded .crelay file appears corrupt or truncated; export a fresh backup or repair the archive before restoring.',
+        400
+      );
+    }
 
     // Validate metadata
     const metaPath = path.join(tempDir, 'meta.json');
     if (!fs.existsSync(metaPath)) {
       throw new AppError('Invalid backup file: missing meta.json', 400);
     }
-    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    let meta: { app?: string; version?: number };
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    } catch {
+      throw new AppError('Invalid backup file: meta.json is not valid JSON', 400);
+    }
     if (meta.app !== 'cadencerelay') {
       throw new AppError('Invalid backup file: not a CadenceRelay backup', 400);
     }
