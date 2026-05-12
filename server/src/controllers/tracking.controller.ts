@@ -195,14 +195,23 @@ export async function unsubscribeGet(req: Request, res: Response): Promise<void>
 // "real unsubscribe processed" (2xx) and "this token is not valid" (4xx) — if
 // we 200 on every input, mailbox providers conclude the endpoint is fake.
 //
-// Two token shapes are accepted:
+// Three token shapes are accepted:
 //   1. campaign_recipients.tracking_token (32 hex chars) — campaign sends.
 //   2. HMAC contact token (c_<uuid>.<sig>) — sends that don't have a
 //      campaign_recipients row, e.g. automation drips.
+//   3. test-<timestamp> — placeholder tokens from the /settings/test-email
+//      path. We 200 these without doing anything so mailbox-provider probes
+//      see a healthy endpoint instead of dragging down sender reputation
+//      with 404s on every test send.
 export async function unsubscribePost(req: Request, res: Response): Promise<void> {
   const { token } = req.params;
 
   try {
+    if (token.startsWith('test-')) {
+      res.status(200).type('text/plain').send('Unsubscribed');
+      return;
+    }
+
     const hmacContactId = parseContactUnsubToken(token);
     if (hmacContactId) {
       const ok = await unsubscribeByContactId(hmacContactId);
