@@ -45,3 +45,17 @@ coverage/
 # Misc
 .claude/
 uploads/
+
+# SSH / TLS private keys — never commit, regardless of where they live
+*.pem
+*.key
+id_rsa
+id_ed25519
+*_key
+*_key.pub
+
+# Local outreach data (CSV exports, suppression lists, backup archives)
+*.csv
+suppressed_*.txt
+*.crelay
+cadencerelay-backup-*.zip
