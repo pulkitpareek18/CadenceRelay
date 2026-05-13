@@ -54,6 +54,13 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Reclaim build cache + dangling images from previous --no-cache rebuilds.
+            # Without this, the 20G root disk fills to 100% within a few weeks of
+            # frequent deploys (5+ GB of unreferenced layers accumulates), which
+            # silently breaks Redis RDB snapshots and cascades to API/worker errors.
+            docker builder prune -af --filter "until=24h" || true
+            docker image prune -af --filter "until=72h" || true
+
             # Rebuild containers (postgres & redis are NOT rebuilt — data is safe)
             docker compose -f docker-compose.prod.yml build --no-cache server worker client
 

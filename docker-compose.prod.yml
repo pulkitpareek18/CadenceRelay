@@ -19,7 +19,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction
+    # 1gb cap so a 17k-recipient campaign can sit comfortably in BullMQ's
+    # wait/active/completed structures without hitting OOM and refusing new
+    # writes. 256mb was the historical default; it broke on 2026-05-13 when
+    # a Karnataka campaign + RDB snapshot bloat exceeded the cap and Redis
+    # entered the noeviction-block state, cascading to login 500s and a
+    # stuck campaign.
+    command: redis-server --maxmemory 1gb --maxmemory-policy noeviction
     volumes:
       - redisdata:/data
     healthcheck:
@@ -27,6 +33,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - backend
 
@@ -54,6 +65,11 @@ services:
       CORS_ORIGIN: ${TRACKING_DOMAIN}
     volumes:
       - uploads:/app/uploads
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     networks:
       - backend
       - frontend
@@ -85,6 +101,11 @@ services:
       UPLOAD_DIR: /app/uploads
     volumes:
       - uploads:/app/uploads
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     networks:
       - backend
 
