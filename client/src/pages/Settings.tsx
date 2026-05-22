@@ -242,7 +242,7 @@ function SettingsContent() {
   const testAccountMutation = useTestEmailAccount();
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
-  const [editAccount, setEditAccount] = useState<{ label: string; fromName: string; host: string; port: number; dailyLimit: number; pass: string; accessKeyId: string; secretAccessKey: string }>({ label: '', fromName: '', host: 'smtp.gmail.com', port: 587, dailyLimit: 500, pass: '', accessKeyId: '', secretAccessKey: '' });
+  const [editAccount, setEditAccount] = useState<{ label: string; fromName: string; fromEmail: string; host: string; port: number; dailyLimit: number; pass: string; accessKeyId: string; secretAccessKey: string }>({ label: '', fromName: '', fromEmail: '', host: 'smtp.gmail.com', port: 587, dailyLimit: 500, pass: '', accessKeyId: '', secretAccessKey: '' });
   const [newAccount, setNewAccount] = useState({ label: '', providerType: 'gmail' as 'gmail' | 'ses', host: 'smtp.gmail.com', port: 587, user: '', pass: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', fromEmail: '', fromName: '', dailyLimit: 500 });
 
   // Domain suppression state
@@ -656,12 +656,20 @@ function SettingsContent() {
               </div>
             </div>
             {newAccount.providerType === 'gmail' ? (
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-medium text-gray-600">From Name</label><input type="text" value={newAccount.fromName} onChange={(e) => setNewAccount({ ...newAccount, fromName: e.target.value })} placeholder="e.g., BITS PILANI - YEB" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-600">Email</label><input type="email" value={newAccount.user} onChange={(e) => setNewAccount({ ...newAccount, user: e.target.value })} placeholder="you@gmail.com" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-600">App Password</label><input type="password" value={newAccount.pass} onChange={(e) => setNewAccount({ ...newAccount, pass: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-600">SMTP Host</label><input type="text" value={newAccount.host} onChange={(e) => setNewAccount({ ...newAccount, host: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-600">Port</label><input type="number" value={newAccount.port} onChange={(e) => setNewAccount({ ...newAccount, port: parseInt(e.target.value) || 587 })} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500">
+                  Works with Gmail, Brevo, Mailgun, Postmark, or any SMTP relay. If your provider
+                  (e.g. Brevo) issues a separate login username, fill in <span className="font-medium">Sender Email</span> with
+                  the verified address you actually want recipients to see.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="block text-xs font-medium text-gray-600">From Name</label><input type="text" value={newAccount.fromName} onChange={(e) => setNewAccount({ ...newAccount, fromName: e.target.value })} placeholder="e.g., BITS PILANI - YEB" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-600">Auth Email / SMTP Username</label><input type="text" value={newAccount.user} onChange={(e) => setNewAccount({ ...newAccount, user: e.target.value })} placeholder="you@gmail.com or 9abc12@smtp-brevo.com" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                  <div className="col-span-2"><label className="block text-xs font-medium text-gray-600">Sender Email <span className="text-gray-400">(optional — leave blank to use auth email)</span></label><input type="email" value={newAccount.fromEmail} onChange={(e) => setNewAccount({ ...newAccount, fromEmail: e.target.value })} placeholder="hello@yourdomain.com" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-600">App Password</label><input type="password" value={newAccount.pass} onChange={(e) => setNewAccount({ ...newAccount, pass: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-600">SMTP Host</label><input type="text" value={newAccount.host} onChange={(e) => setNewAccount({ ...newAccount, host: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-600">Port</label><input type="number" value={newAccount.port} onChange={(e) => setNewAccount({ ...newAccount, port: parseInt(e.target.value) || 587 })} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
@@ -678,7 +686,7 @@ function SettingsContent() {
             <button
               onClick={() => {
                 const config = newAccount.providerType === 'gmail'
-                  ? { host: newAccount.host, port: newAccount.port, user: newAccount.user, pass: newAccount.pass, fromName: newAccount.fromName || undefined }
+                  ? { host: newAccount.host, port: newAccount.port, user: newAccount.user, pass: newAccount.pass, fromName: newAccount.fromName || undefined, fromEmail: newAccount.fromEmail.trim() || undefined }
                   : { region: newAccount.region, accessKeyId: newAccount.accessKeyId, secretAccessKey: newAccount.secretAccessKey, fromEmail: newAccount.fromEmail, fromName: newAccount.fromName };
                 createAccountMutation.mutate({ label: newAccount.label, providerType: newAccount.providerType, config, dailyLimit: newAccount.dailyLimit }, {
                   onSuccess: () => { setShowAddAccount(false); setNewAccount({ label: '', providerType: 'gmail', host: 'smtp.gmail.com', port: 587, user: '', pass: '', region: 'us-east-1', accessKeyId: '', secretAccessKey: '', fromEmail: '', fromName: '', dailyLimit: 500 }); },
@@ -705,8 +713,11 @@ function SettingsContent() {
                     <div>
                       <div className="font-medium text-sm">{acct.label}</div>
                       <div className="text-xs text-gray-500 font-mono">
-                        {acct.config.fromName ? `${acct.config.fromName} — ` : ''}{acct.provider_type === 'gmail' ? (acct.config.user as string || 'Not configured') : (acct.config.fromEmail as string || 'Not configured')}
+                        {acct.config.fromName ? `${acct.config.fromName} — ` : ''}{acct.provider_type === 'gmail' ? ((acct.config.fromEmail as string) || (acct.config.user as string) || 'Not configured') : (acct.config.fromEmail as string || 'Not configured')}
                       </div>
+                      {acct.provider_type === 'gmail' && Boolean(acct.config.fromEmail) && Boolean(acct.config.user) && acct.config.fromEmail !== acct.config.user && (
+                        <div className="text-[10px] text-gray-400 font-mono">auth: {acct.config.user as string}</div>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -718,6 +729,7 @@ function SettingsContent() {
                         setEditAccount({
                           label: acct.label,
                           fromName: (acct.config.fromName as string) || '',
+                          fromEmail: (acct.config.fromEmail as string) || '',
                           host: (acct.config.host as string) || 'smtp.gmail.com',
                           port: (acct.config.port as number) || 587,
                           dailyLimit: acct.daily_limit,
@@ -778,6 +790,10 @@ function SettingsContent() {
                             <input type="password" value={editAccount.pass} onChange={(e) => setEditAccount({ ...editAccount, pass: e.target.value })} placeholder="Leave blank to keep" className="mt-1 w-full rounded border px-2 py-1.5 text-sm" />
                           </div>
                         </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600">Sender Email <span className="text-gray-400">(optional — overrides auth email in the From: header; required for Brevo-style relays)</span></label>
+                          <input type="email" value={editAccount.fromEmail} onChange={(e) => setEditAccount({ ...editAccount, fromEmail: e.target.value })} placeholder="Leave blank to use auth email" className="mt-1 w-full rounded border px-2 py-1.5 text-sm" />
+                        </div>
                       </>
                     )}
                     {acct.provider_type === 'ses' && (
@@ -798,6 +814,9 @@ function SettingsContent() {
                         if (acct.provider_type === 'gmail') {
                           config.host = editAccount.host;
                           config.port = editAccount.port;
+                          // Send empty string when cleared so the server can drop the override
+                          // (encryptConfig won't touch non-sensitive keys, so the merge will overwrite).
+                          config.fromEmail = editAccount.fromEmail.trim();
                           if (editAccount.pass) config.pass = editAccount.pass;
                         }
                         if (acct.provider_type === 'ses' && editAccount.accessKeyId) config.accessKeyId = editAccount.accessKeyId;

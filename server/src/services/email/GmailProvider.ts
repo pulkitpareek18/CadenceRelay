@@ -9,9 +9,15 @@ import { logger } from '../../utils/logger';
 interface GmailConfig {
   host: string;
   port: number;
-  user: string;
+  user: string;          // SMTP auth identity (login username). For Brevo this is
+                         // a generated address like `9abc12@smtp-brevo.com`.
   pass: string;
   fromName?: string;
+  fromEmail?: string;    // Optional override for the visible From: address.
+                         // When omitted, defaults to `user` (the historical
+                         // Gmail/SMTP behaviour). Required for relays like
+                         // Brevo / Mailgun / Postmark where the SMTP login
+                         // username is not a deliverable mailbox.
 }
 
 export class GmailProvider implements EmailProvider {
@@ -19,9 +25,13 @@ export class GmailProvider implements EmailProvider {
   private fromAddress: string;
 
   constructor(config: GmailConfig) {
+    // Separate auth identity from visible sender. `fromEmail` (trimmed) wins
+    // when present; otherwise fall back to `user` so existing single-field
+    // Gmail accounts keep working unchanged.
+    const senderEmail = config.fromEmail?.trim() || config.user;
     this.fromAddress = config.fromName
-      ? `"${config.fromName}" <${config.user}>`
-      : config.user;
+      ? `"${config.fromName}" <${senderEmail}>`
+      : senderEmail;
     this.transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
@@ -36,6 +46,16 @@ export class GmailProvider implements EmailProvider {
       rateDelta: 1000,
       rateLimit: 5,
     });
+  }
+
+  /** For tests/diagnostics only — exposes the computed RFC 5322 From: value. */
+  getFromAddress(): string {
+    return this.fromAddress;
+  }
+
+  /** Allow callers (and tests) to release the connection pool. */
+  async close(): Promise<void> {
+    this.transporter.close();
   }
 
   async send(options: EmailOptions): Promise<SendResult> {

@@ -23,7 +23,16 @@ function maybeDecrypt(value: string): string {
 export function createProvider(provider: string, config: Record<string, unknown>): EmailProvider {
   switch (provider) {
     case 'gmail': {
-      const gmailConfig = config as { host: string; port: number; user: string; pass: string; fromName?: string };
+      // `fromEmail` is optional and lets the visible sender differ from the
+      // SMTP auth username (required for Brevo/Mailgun/Postmark relays).
+      const gmailConfig = config as {
+        host: string;
+        port: number;
+        user: string;
+        pass: string;
+        fromName?: string;
+        fromEmail?: string;
+      };
       return new GmailProvider({
         ...gmailConfig,
         pass: maybeDecrypt(gmailConfig.pass),
